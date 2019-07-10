@@ -474,19 +474,6 @@ async def query_repo_data(schema, org_repo, async_exec):
     return repo
 
 
-async def async_main(auth_token, org_repos):
-    async with aiohttp_session() as s:
-        async_exec = quiz.async_executor(
-            url="https://api.github.com/graphql",
-            auth=auth_factory(auth_token),
-            client=s,
-        )
-        schema = await async_github_schema_from_cache_or_url(
-            "github_graphql_schema.json", async_exec
-        )
-        return query_repo_data(schema, org_repo, async_exec)
-
-
 async def get_org_repo_langs(auth_token, org_repo):
     async with aiohttp_session() as s:
         async_exec = quiz.async_executor(
