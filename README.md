@@ -7,11 +7,12 @@ Scripts for finding suspicious werewolf / rugaru / rougarou-like malware open so
 #### Requirements
 
 
+
+
 ### How does this differ from other tools?
 
 * language agnostic
 * sandboxed
-
 
 ### Directions
 
@@ -49,9 +50,19 @@ git clone https://github.com/mozilla-services/find-package-rugaru.git
 * `./bin/base_image_config.json`
 * `./bin/base_image_config.json.lock` hashes
 
-
-
 These scripts generally assume the containers follow [dockerflow](https://github.com/mozilla-services/Dockerflow) i.e.
 
 * app source is in `/app`
 * `/app/version.json` exists and includes repo, version, and CI build info
+
+
+### Design choices
+
+* failures should be isolated
+  * to each repo, dep. file, etc. + downstream jobs
+  * errors should be caught (and wehere applicable retried w/ delay or rate limiting) and retried where applicable
+* workload is IO heavy and (for now) small data so Beam, Spark, etc. and other Big Data tools not applicable
+* however, we want to be able to save, restore, retry, and replay from checkpoints (i.e. not have to run a full task graph again and be able to test against fixtures)
+* apply a flexible pipeline of analysers to specific org,repo,dep-file,dep paths
+
+For this reason we're trying RxPy since it gives access to combinators with async support (without relying on a pure generator pipeline).
