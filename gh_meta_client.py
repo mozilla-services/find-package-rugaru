@@ -265,7 +265,7 @@ async def query_repo_data(schema, org_repo, async_exec):
     dep_page_size = 100
 
     # fetch top-level repo info w/ first repo_page_size of linked nodes except manifests
-    query = repo_query(schema, *org_repo.split("/", 1), first=repo_page_size)
+    query = repo_query(schema, org_repo.org, org_repo.repo, first=repo_page_size)
     print(org_repo, "fetching repo page", file=sys.stderr)
     repo = await async_query(async_exec, query)
     if repo is None or repo.repository is None:
@@ -319,7 +319,7 @@ async def query_repo_data(schema, org_repo, async_exec):
     while response.repository.languages.pageInfo.hasNextPage:
         cursor = response.repository.languages.pageInfo.endCursor
         query = repo_langs_query_next_page(
-            schema, *org_repo.split("/", 1), first=lang_page_size, after=cursor
+            schema, org_repo.org, org_repo.repo, first=lang_page_size, after=cursor
         )
         print(
             org_repo,
@@ -354,7 +354,7 @@ async def query_repo_data(schema, org_repo, async_exec):
     while response.repository.dependencyGraphManifests.pageInfo.hasNextPage:
         cursor = response.repository.dependencyGraphManifests.pageInfo.endCursor
         query = repo_manifests_query_next_page(
-            schema, *org_repo.split("/", 1), first=manifests_page_size, after=cursor
+            schema, org_repo.org, org_repo.repo, first=manifests_page_size, after=cursor
         )
         print(
             org_repo,
@@ -397,7 +397,7 @@ async def query_repo_data(schema, org_repo, async_exec):
             manifest_cursor = None
             query = repo_manifest_deps_query_next_page(
                 schema,
-                *org_repo.split("/", 1),
+                org_repo.org, org_repo.repo,
                 manifest_first=manifests_page_size,
                 manifest_after=manifest_cursor,  # response.repository.dependencyGraphManifests.pageInfo.endCursor,
                 first=dep_page_size,
@@ -481,45 +481,20 @@ async def async_main(auth_token, org_repos):
             auth=auth_factory(auth_token),
             client=s,
         )
-
         schema = await async_github_schema_from_cache_or_url(
             "github_graphql_schema.json", async_exec
         )
-
-        tasks = []
-        for org_repo in org_repos:
-            tasks.append(
-                asyncio.ensure_future(query_repo_data(schema, org_repo, async_exec))
-            )
-
-        await asyncio.gather(*tasks)
-        return list(zip(org_repos, tasks))
+        return query_repo_data(schema, org_repo, async_exec)
 
 
-def run(auth_token, org_repos):
-    loop = asyncio.get_event_loop()
-    async_results = loop.run_until_complete(async_main(auth_token, org_repos))
-
-    results = []
-    for org_repo, task in async_results:
-        if not isinstance(task, asyncio.Task) and isinstance(task, str):  # dry run
-            print(org_repo, task)
-            continue
-        if not task.done():
-            print("task for ", org_repo, "still running somehow", file=sys.stderr)
-            continue
-        if task.cancelled():
-            print("task for ", org_repo, "was cancelled", file=sys.stderr)
-            continue
-        if task.exception():
-            print("task for ", org_repo, "errored.", file=sys.stderr)
-            task.print_stack()
-            continue
-        result = task.result()
-        if result is None:
-            print("task for ", org_repo, "returned result None.", file=sys.stderr)
-            continue
-
-        results.append((org_repo, result))
-
-    return results
+async def get_org_repo_langs(auth_token, org_repo):
+    async with aiohttp_session() as s:
+        async_exec = quiz.async_executor(
+            url="https://api.github.com/graphql",
+            auth=auth_factory(auth_token),
+            client=s,
+        )
+        schema = await async_github_schema_from_cache_or_url(
+            "github_graphql_schema.json", async_exec
+        )
+        return await query_repo_data(schema, org_repo, async_exec)

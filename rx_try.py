@@ -17,6 +17,8 @@ import rx.operators as op
 from rx.scheduler.eventloop import AsyncIOScheduler
 from rx.subject import AsyncSubject
 
+import gh_meta_client as gh_client
+
 OrgRepo = namedtuple("OrgRepo", ["org", "repo"])
 
 # TODO: run in container or use builder containers? i.e. as fetcher blah...
@@ -24,6 +26,7 @@ OrgRepo = namedtuple("OrgRepo", ["org", "repo"])
 # TODO: script to compare built version against uploaded
 # TODO: list tags and sample commits per time period in a cloned repo
 # TODO: fetch image from docker registry
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -57,11 +60,6 @@ async def aio_delay(item):
     return item
 
 
-
-async def get_org_repo_langs():
-    pass
-
-
 def do_async(func, *args, **kwargs):
     return rx.from_future(asyncio.ensure_future(func(*args, **kwargs)))
 
@@ -78,9 +76,16 @@ def main():
     loop = asyncio.get_event_loop()
     aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
 
+    get_org_repo_langs = functools.partial(
+        gh_client.get_org_repo_langs, args.auth_token
+    )
+    async_get_org_repo_langs = functools.partial(do_async, get_org_repo_langs)
+
     org_repos = rx.from_iterable(args.org_repos).pipe(
         op.map(org_repo_to_OrgRepo),
-        op.flat_map(functools.partial(do_async, aio_delay)),  # NB: must flat_map to materialize the futures otherwise we receive type rx.core.observable.observable.Observable
+        op.flat_map(
+            async_get_org_repo_langs
+        ),  # NB: must flat_map to materialize the futures otherwise we receive type rx.core.observable.observable.Observable
     )
 
     org_repos.subscribe(
