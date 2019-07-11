@@ -176,22 +176,38 @@ def repo_query(schema, org_name, repo_name, first=10):
     ]
 
 
-def repo_langs_query_next_page(schema, org_name, repo_name, after, first=10):
+def repo_langs_query(schema, org_name, repo_name, first=10, after=None):
     _ = quiz.SELECTOR
-    return schema.query[
-        _.rateLimit[_.limit.cost.remaining.resetAt].repository(
-            owner=org_name, name=repo_name
-        )[
-            _.languages(after=after, first=first)[
-                _.pageInfo[_.hasNextPage.endCursor].edges[_.node[_.id.name]]
+    if after:
+        return schema.query[
+            _.rateLimit[_.limit.cost.remaining.resetAt].repository(
+                owner=org_name, name=repo_name
+            )[
+                _.languages(after=after, first=first)[
+                    _.pageInfo[_.hasNextPage.endCursor].edges[_.node[_.id.name]]
+                ]
             ]
         ]
-    ]
+    else:
+        return schema.query[
+            _.rateLimit[_.limit.cost.remaining.resetAt].repository(
+                owner=org_name, name=repo_name
+            )[
+                _.createdAt.updatedAt.description.isArchived.isPrivate.isFork.languages(
+                    first=first
+                )[
+                    _.pageInfo[_.hasNextPage.endCursor].totalCount.totalSize.edges[
+                        _.node[_.id.name]
+                    ]
+                ]
+            ]
+        ]
 
 
-def repo_manifests_query_next_page(schema, org_name, repo_name, after, first=10):
+def repo_manifests_query(schema, org_name, repo_name, first=10, after=None):
     _ = quiz.SELECTOR
-    return schema.query[
+    if after:
+        return schema.query[
         _.rateLimit[_.limit.cost.remaining.resetAt].repository(
             owner=org_name, name=repo_name
         )[
@@ -210,18 +226,38 @@ def repo_manifests_query_next_page(schema, org_name, repo_name, after, first=10)
             ]
         ]
     ]
+    else:
+        return schema.query[
+        _.rateLimit[_.limit.cost.remaining.resetAt].repository(
+            owner=org_name, name=repo_name
+        )[
+            _.dependencyGraphManifests(first=first)[
+                _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
+                    _.node[
+                        _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
+                            first=first
+                        )[
+                            _.pageInfo[_.hasNextPage.endCursor].totalCount.nodes[
+                                _.packageName.packageManager.hasDependencies.requirements
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
 
 
-def repo_manifest_deps_query_next_page(
-    schema, org_name, repo_name, manifest_first, manifest_after, after, first=10
+def repo_manifest_deps_query(
+    schema, org_name, repo_name, manifest_first=5, manifest_after=None, first=100, after=None
 ):
     _ = quiz.SELECTOR
-    if manifest_after is None:
+    if after is None:
         return schema.query[
             _.rateLimit[_.limit.cost.remaining.resetAt].repository(
                 owner=org_name, name=repo_name
             )[
-                _.dependencyGraphManifests(first=first)[
+                _.dependencyGraphManifests(first=manifest_first)[
                     _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
                         _.node[
                             _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
@@ -241,7 +277,7 @@ def repo_manifest_deps_query_next_page(
             _.rateLimit[_.limit.cost.remaining.resetAt].repository(
                 owner=org_name, name=repo_name
             )[
-                _.dependencyGraphManifests(first=first, after=after)[
+                _.dependencyGraphManifests(first=manifest_first, after=manifest_after)[
                     _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
                         _.node[
                             _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
