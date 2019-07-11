@@ -295,26 +295,44 @@ def repo_manifest_deps_query(
 
 
 
+async def _init(auth_token):
+    session = aiohttp_session()
+    async_exec = quiz.async_executor(
+        url="https://api.github.com/graphql",
+        auth=auth_factory(auth_token),
+        client=session,
     )
+    schema = await async_github_schema_from_cache_or_url(
+        "github_graphql_schema.json", async_exec
+    )
+    return session, async_exec, schema
 
 
+async def get_org_repo_langs(auth_token, first, org_repo):
+    session, async_exec, schema = await _init(auth_token)
+
+    query = repo_langs_query(schema, org_repo.org, org_repo.repo, first)
+    print(org_repo, "fetching repo page", file=sys.stderr)
+    repo = await async_query(async_exec, query)
+    if repo is None or repo.repository is None:
+        raise Exception(org_repo, "fetching repo page returned repo.repository None")
+    # TODO: paginate
+    assert not repo.repository.languages.pageInfo.hasNextPage
+    org_repo.languages.extend(repo.repository.languages.edges)
+
+    await session.close()
+    return org_repo
 
 
+async def get_dep_files(auth_token, first, org_repo):
+    session, async_exec, schema = await _init(auth_token)
 
+    query = repo_manifests_query(schema, org_repo.org, org_repo.repo, first)
+    print("fetching dep files page for {0.org} {0.repo}".format(org_repo), file=sys.stderr)
+    repo = await async_query(async_exec, query)
+    # TODO: paginate
+    assert not repo.repository.dependencyGraphManifests.pageInfo.hasNextPage
+    org_repo.dep_files.extend(repo.repository.dependencyGraphManifests.edges)
 
-
-
-
-
-
-async def get_org_repo_langs(auth_token, org_repo):
-    async with aiohttp_session() as s:
-        async_exec = quiz.async_executor(
-            url="https://api.github.com/graphql",
-            auth=auth_factory(auth_token),
-            client=s,
-        )
-        schema = await async_github_schema_from_cache_or_url(
-            "github_graphql_schema.json", async_exec
-        )
-        return await query_repo_data(schema, org_repo, async_exec)
+    await session.close()
+    return org_repo
