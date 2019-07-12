@@ -51,11 +51,12 @@ class OrgRepo:
                 yield self, df, dep
 
 
-# TODO: run in container or use builder containers? i.e. as fetcher blah...
-# TODO: script to run in container with sysdig capture
-# TODO: script to compare built version against uploaded
 # TODO: list tags and sample commits per time period in a cloned repo
 # TODO: fetch image from docker registry
+# TODO: run in container or use builder containers? i.e. as fetcher blah...
+# TODO: script to run in container with sysdig capture
+# TODO: script to list files in fetched version (and flag sketch filenames)
+# TODO: script to compare built version against uploaded
 
 
 def parse_args():
@@ -90,18 +91,19 @@ async def aio_delay(item):
     return item
 
 
-def do_async(func, *args, **kwargs):
-    return rx.from_future(asyncio.ensure_future(func(*args, **kwargs)))
+def do_async(func, *args, **kwds):
+    """
+    """
+
+    @functools.wraps(func)
+    def wrapper(*fargs, **fkwds):
+        return rx.from_future(asyncio.create_task(func(*fargs, **fkwds)))
+
+    return wrapper
 
 
-def on_next(item):
-    print("Received {0} {1}".format(item, len(item)))
-    # print("Received {0.org}/{0.repo} {1.blobPath} {2}".format(*item))
-
-
-def on_completed(loop):
-    loop.stop()
-    print("on_completed Done!")
+def map_async(func, *args, **kwds):
+    return op.flat_map(do_async(func, *args, **kwds))
 
 
 def main():
@@ -110,52 +112,68 @@ def main():
 
     loop = asyncio.get_event_loop()
     aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
-
-    get_org_repo_langs = functools.partial(
-        gh_client.get_org_repo_langs, args.auth_token, 50
+    ghc = gh_client.GHClient(
+        auth_token=args.auth_token,
+        lang_page_size=50,
+        dep_file_page_size=3,
+        dep_page_size=5,
     )
-    async_get_org_repo_langs = functools.partial(do_async, get_org_repo_langs)
-
-    get_dep_files = functools.partial(gh_client.get_dep_files, args.auth_token, 3)
-    async_get_dep_files = functools.partial(do_async, get_dep_files)
-
-    get_deps = functools.partial(gh_client.get_deps, args.auth_token, 5)
-    async_get_deps = functools.partial(do_async, get_deps)
 
     # NB: must flat_map to materialize the futures otherwise we receive type rx.core.observable.observable.Observable
+    org_repos = rx.from_iterable(args.org_repos).pipe(
+        op.map(org_repo_to_OrgRepo), map_async(ghc.get_org_repo_langs)
+    )
 
-    org_repos = (
-        rx.from_iterable(args.org_repos)
-        .pipe(
-            op.map(org_repo_to_OrgRepo),
-            op.flat_map(async_get_org_repo_langs),
-            op.flat_map(async_get_dep_files),
-            op.flat_map(lambda org_repo: rx.from_iterable(org_repo.iter_dep_files())),
-            op.flat_map(async_get_deps),
-            op.flat_map(
-                lambda org_repo: rx.from_iterable(org_repo.iter_dep_file_deps())
-            ),
-            op.filter(
-                lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2].packageManager
-                == "NPM"
-            ),
-            # op.do_action(lambda org_repo: print('!!!', item)),
-            op.flat_map(
-                functools.partial(
-                    do_async,
-                    lambda org_repo_dep_file_dep: npmsio_client.async_main(
-                        org_repo_dep_file_dep[2].packageName
-                    ),
-                )
-            ),
-        )
-        .subscribe(
-            on_next=on_next,
-            on_error=lambda e: print("Error Occurred: {0}".format(e)),
-            on_completed=functools.partial(on_completed, loop=loop),
-            scheduler=aio_scheduler,
+    dep_files = org_repos.pipe(
+        map_async(ghc.get_dep_files),
+        op.flat_map(lambda org_repo: rx.from_iterable(org_repo.iter_dep_files())),
+    )
+
+    deps = dep_files.pipe(
+        map_async(ghc.get_deps),
+        op.flat_map(lambda org_repo: rx.from_iterable(org_repo.iter_dep_file_deps())),
+    )
+
+    npm_deps = deps.pipe(
+        op.filter(
+            lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2].packageManager
+            == "NPM"
         )
     )
+
+    # npm_deps.pipe(op.count(npm_deps)).subscribe(
+    #     on_completed=lambda x: print("found {} npm deps".format(x)),
+    #     on_error=lambda e: print("Count error Occurred: {0}".format(e)),
+    #     scheduler=aio_scheduler,
+    # )
+
+    npmsio_scores = npm_deps.pipe(
+        op.map(lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2]),
+        op.buffer_with_time_or_count(3.0, 50),  # 3 seconds or 50 items
+        # op.do_action(lambda item: print("!!!", item)),
+        map_async(
+            lambda deps: npmsio_client.async_main([dep.packageName for dep in deps])
+        ),
+        op.do_action(do_async(ghc.close)),
+    )
+
+    def on_next(item):
+        # print("Received {0}".format(item))
+        print("Received {0} {1}".format(type(item), len(item)))
+        # print("Received {0.org}/{0.repo} {1.blobPath} {2}".format(*item))
+        pass
+
+    def on_completed(loop, gh_client):
+        loop.stop()
+        print("on_completed Done!")
+
+    npmsio_scores.subscribe(
+        on_next=on_next,
+        on_error=lambda e: print("Error Occurred: {0}".format(e)),
+        on_completed=functools.partial(on_completed, loop=loop, gh_client=ghc),
+        scheduler=aio_scheduler,
+    )
+
     loop.run_forever()
     print("main done")
 

@@ -3,6 +3,7 @@ import sys
 import asyncio
 import aiohttp
 import time
+from typing import Dict, Tuple, Sequence
 
 import snug
 import quiz
@@ -300,25 +301,51 @@ def repo_manifest_deps_query(
         ]
 
 
-async def _init(auth_token, session):
-    async_exec = quiz.async_executor(
-        url="https://api.github.com/graphql",
-        auth=auth_factory(auth_token),
-        client=session,
-    )
-    schema = await async_github_schema_from_cache_or_url(
-        "github_graphql_schema.json", async_exec
-    )
-    return async_exec, schema
+class GHClient:
+    def __init__(
+        self,
+        auth_token: str,
+        lang_page_size: int,
+        dep_file_page_size: int,
+        dep_page_size: int,
+    ):
+        self.auth_token = auth_token
+        self.lang_page_size = lang_page_size
+        self.dep_file_page_size = dep_file_page_size
+        self.dep_page_size = dep_page_size
 
+    async def _async_init(self):
+        if not all(
+            [
+                hasattr(self, "session"),
+                hasattr(self, "async_exec"),
+                hasattr(self, "schema"),
+            ]
+        ):
+            self.session = aiohttp_session()
+            self.async_exec = quiz.async_executor(
+                url="https://api.github.com/graphql",
+                auth=auth_factory(self.auth_token),
+                client=self.session,
+            )
+            self.schema = await async_github_schema_from_cache_or_url(
+                "github_graphql_schema.json", self.async_exec
+            )
+        return self.session
 
-async def get_org_repo_langs(auth_token, first, org_repo):
-    async with aiohttp_session() as session:
-        async_exec, schema = await _init(auth_token, session)
+    async def close(self, *args):
+        # see: https://aiohttp.readthedocs.io/en/stable/client_advanced.html#graceful-shutdown
+        self.session.close()
+        await asyncio.sleep(0.25)
 
-        query = repo_langs_query(schema, org_repo.org, org_repo.repo, first)
+    async def get_org_repo_langs(self, org_repo, first=None):
+        if first is None:
+            first = self.lang_page_size
+
+        await self._async_init()
+        query = repo_langs_query(self.schema, org_repo.org, org_repo.repo, first=first)
         print(org_repo, "fetching repo page", file=sys.stderr)
-        repo = await async_query(async_exec, query)
+        repo = await async_query(self.async_exec, query)
         if repo is None or repo.repository is None:
             raise Exception(
                 org_repo, "fetching repo page returned repo.repository None"
@@ -326,20 +353,21 @@ async def get_org_repo_langs(auth_token, first, org_repo):
         # TODO: paginate
         assert not repo.repository.languages.pageInfo.hasNextPage
         org_repo.languages.extend(repo.repository.languages.edges)
+        return org_repo
 
-    return org_repo
+    async def get_dep_files(self, org_repo, first=None):
+        if first is None:
+            first = self.dep_file_page_size
 
-
-async def get_dep_files(auth_token, first, org_repo):
-    async with aiohttp_session() as session:
-        async_exec, schema = await _init(auth_token, session)
-
-        query = repo_manifests_query(schema, org_repo.org, org_repo.repo, first)
+        await self._async_init()
+        query = repo_manifests_query(
+            self.schema, org_repo.org, org_repo.repo, first=first
+        )
         print(
             "fetching dep files page for {0.org} {0.repo}".format(org_repo),
             file=sys.stderr,
         )
-        repo = await async_query(async_exec, query)
+        repo = await async_query(self.async_exec, query)
         # TODO: paginate
         assert not repo.repository.dependencyGraphManifests.pageInfo.hasNextPage
 
@@ -348,22 +376,22 @@ async def get_dep_files(auth_token, first, org_repo):
 
         for edge in repo.repository.dependencyGraphManifests.edges:
             org_repo.dep_file_query_params[edge.node.id] = dict(
-                cursor=cursor, first=first
+                cursor=cursor, first=self.dep_file_page_size
             )
+        return org_repo
 
-    return org_repo
+    async def get_deps(self, org_repo_dep_file, first=None):
+        if first is None:
+            first = self.dep_page_size
 
-
-async def get_deps(auth_token, first, org_repo_dep_file):
-    async with aiohttp_session() as session:
-        async_exec, schema = await _init(auth_token, session)
+        await self._async_init()
 
         org_repo, dep_file = org_repo_dep_file
         query_params = org_repo.dep_file_query_params[dep_file.id]
         print(org_repo.org, org_repo.repo, dep_file, query_params)
 
         query = repo_manifest_deps_query(
-            schema,
+            self.schema,
             org_repo.org,
             org_repo.repo,
             manifest_first=query_params["first"],
@@ -377,7 +405,7 @@ async def get_deps(auth_token, first, org_repo_dep_file):
             ),
             file=sys.stderr,
         )
-        repo = await async_query(async_exec, query)
+        repo = await async_query(self.async_exec, query)
         # print('hi', len(repo.repository.dependencyGraphManifests.edges))
 
         for manifest_edge in repo.repository.dependencyGraphManifests.edges:
@@ -395,4 +423,4 @@ async def get_deps(auth_token, first, org_repo_dep_file):
             file=sys.stderr,
         )
 
-    return org_repo
+        return org_repo

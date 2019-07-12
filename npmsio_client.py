@@ -26,8 +26,7 @@ async def async_query(session, json):
     return response_json
 
 
-async def async_main(package_name):
+async def async_main(package_names):
     async with aiohttp_session() as s:
-        print("pn", package_name)
-        response = await async_query(s, [package_name])
+        response = await async_query(s, package_names)
         return response
