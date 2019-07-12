@@ -37,12 +37,12 @@ class OrgRepo:
     # yet)
     dep_file_query_params: dict = field(default_factory=dict)
 
-    def iter_dep_files(self) -> dict:
+    def iter_dep_files(self) -> Dict:
         for df in self.dep_files:
             if df and df.node:
                 yield self, df.node
 
-    def iter_dep_file_deps(self) -> Tuple[dict, dict]:
+    def iter_dep_file_deps(self) -> Tuple[Dict, Dict]:
         for _, df in self.iter_dep_files():
             if df.id not in self.dep_file_deps:
                 continue
