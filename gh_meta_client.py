@@ -208,48 +208,54 @@ def repo_manifests_query(schema, org_name, repo_name, first=10, after=None):
     _ = quiz.SELECTOR
     if after:
         return schema.query[
-        _.rateLimit[_.limit.cost.remaining.resetAt].repository(
-            owner=org_name, name=repo_name
-        )[
-            _.dependencyGraphManifests(first=first, after=after)[
-                _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
-                    _.node[
-                        _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
-                            first=first
-                        )[
-                            _.pageInfo[_.hasNextPage.endCursor].totalCount.nodes[
-                                _.packageName.packageManager.hasDependencies.requirements
+            _.rateLimit[_.limit.cost.remaining.resetAt].repository(
+                owner=org_name, name=repo_name
+            )[
+                _.dependencyGraphManifests(first=first, after=after)[
+                    _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
+                        _.node[
+                            _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
+                                first=first
+                            )[
+                                _.pageInfo[_.hasNextPage.endCursor].totalCount.nodes[
+                                    _.packageName.packageManager.hasDependencies.requirements
+                                ]
                             ]
                         ]
                     ]
                 ]
             ]
         ]
-    ]
     else:
         return schema.query[
-        _.rateLimit[_.limit.cost.remaining.resetAt].repository(
-            owner=org_name, name=repo_name
-        )[
-            _.dependencyGraphManifests(first=first)[
-                _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
-                    _.node[
-                        _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
-                            first=first
-                        )[
-                            _.pageInfo[_.hasNextPage.endCursor].totalCount.nodes[
-                                _.packageName.packageManager.hasDependencies.requirements
+            _.rateLimit[_.limit.cost.remaining.resetAt].repository(
+                owner=org_name, name=repo_name
+            )[
+                _.dependencyGraphManifests(first=first)[
+                    _.pageInfo[_.hasNextPage.endCursor].totalCount.edges[
+                        _.node[
+                            _.id.blobPath.dependenciesCount.exceedsMaxSize.filename.parseable.dependencies(
+                                first=first
+                            )[
+                                _.pageInfo[_.hasNextPage.endCursor].totalCount.nodes[
+                                    _.packageName.packageManager.hasDependencies.requirements
+                                ]
                             ]
                         ]
                     ]
                 ]
             ]
         ]
-    ]
 
 
 def repo_manifest_deps_query(
-    schema, org_name, repo_name, manifest_first=5, manifest_after=None, first=100, after=None
+    schema,
+    org_name,
+    repo_name,
+    manifest_first=5,
+    manifest_after=None,
+    first=100,
+    after=None,
 ):
     _ = quiz.SELECTOR
     if after is None:
@@ -294,9 +300,7 @@ def repo_manifest_deps_query(
         ]
 
 
-
-async def _init(auth_token):
-    session = aiohttp_session()
+async def _init(auth_token, session):
     async_exec = quiz.async_executor(
         url="https://api.github.com/graphql",
         auth=auth_factory(auth_token),
@@ -305,34 +309,90 @@ async def _init(auth_token):
     schema = await async_github_schema_from_cache_or_url(
         "github_graphql_schema.json", async_exec
     )
-    return session, async_exec, schema
+    return async_exec, schema
 
 
 async def get_org_repo_langs(auth_token, first, org_repo):
-    session, async_exec, schema = await _init(auth_token)
+    async with aiohttp_session() as session:
+        async_exec, schema = await _init(auth_token, session)
 
-    query = repo_langs_query(schema, org_repo.org, org_repo.repo, first)
-    print(org_repo, "fetching repo page", file=sys.stderr)
-    repo = await async_query(async_exec, query)
-    if repo is None or repo.repository is None:
-        raise Exception(org_repo, "fetching repo page returned repo.repository None")
-    # TODO: paginate
-    assert not repo.repository.languages.pageInfo.hasNextPage
-    org_repo.languages.extend(repo.repository.languages.edges)
+        query = repo_langs_query(schema, org_repo.org, org_repo.repo, first)
+        print(org_repo, "fetching repo page", file=sys.stderr)
+        repo = await async_query(async_exec, query)
+        if repo is None or repo.repository is None:
+            raise Exception(
+                org_repo, "fetching repo page returned repo.repository None"
+            )
+        # TODO: paginate
+        assert not repo.repository.languages.pageInfo.hasNextPage
+        org_repo.languages.extend(repo.repository.languages.edges)
 
-    await session.close()
     return org_repo
 
 
 async def get_dep_files(auth_token, first, org_repo):
-    session, async_exec, schema = await _init(auth_token)
+    async with aiohttp_session() as session:
+        async_exec, schema = await _init(auth_token, session)
 
-    query = repo_manifests_query(schema, org_repo.org, org_repo.repo, first)
-    print("fetching dep files page for {0.org} {0.repo}".format(org_repo), file=sys.stderr)
-    repo = await async_query(async_exec, query)
-    # TODO: paginate
-    assert not repo.repository.dependencyGraphManifests.pageInfo.hasNextPage
-    org_repo.dep_files.extend(repo.repository.dependencyGraphManifests.edges)
+        query = repo_manifests_query(schema, org_repo.org, org_repo.repo, first)
+        print(
+            "fetching dep files page for {0.org} {0.repo}".format(org_repo),
+            file=sys.stderr,
+        )
+        repo = await async_query(async_exec, query)
+        # TODO: paginate
+        assert not repo.repository.dependencyGraphManifests.pageInfo.hasNextPage
 
-    await session.close()
+        cursor = repo.repository.dependencyGraphManifests.pageInfo.endCursor
+        org_repo.dep_files.extend(repo.repository.dependencyGraphManifests.edges)
+
+        for edge in repo.repository.dependencyGraphManifests.edges:
+            org_repo.dep_file_query_params[edge.node.id] = dict(
+                cursor=cursor, first=first
+            )
+
+    return org_repo
+
+
+async def get_deps(auth_token, first, org_repo_dep_file):
+    async with aiohttp_session() as session:
+        async_exec, schema = await _init(auth_token, session)
+
+        org_repo, dep_file = org_repo_dep_file
+        query_params = org_repo.dep_file_query_params[dep_file.id]
+        print(org_repo.org, org_repo.repo, dep_file, query_params)
+
+        query = repo_manifest_deps_query(
+            schema,
+            org_repo.org,
+            org_repo.repo,
+            manifest_first=query_params["first"],
+            manifest_after=query_params["cursor"],
+            first=first,
+            after=None,
+        )
+        print(
+            "fetching {2} manifest deps for {0.org}/{0.repo} {1.blobPath}".format(
+                org_repo, dep_file, first
+            ),
+            file=sys.stderr,
+        )
+        repo = await async_query(async_exec, query)
+        # print('hi', len(repo.repository.dependencyGraphManifests.edges))
+
+        for manifest_edge in repo.repository.dependencyGraphManifests.edges:
+            if manifest_edge.node.id == dep_file.id:
+                org_repo.dep_file_deps[
+                    dep_file.id
+                ] = manifest_edge.node.dependencies.nodes
+
+        # TODO: paginate
+        # assert not repo.repository.dependencyGraphManifests.pageInfo.hasNextPage
+        print(
+            "found {2} manifest deps for {0.org}/{0.repo} {1.blobPath}".format(
+                org_repo, dep_file, len(org_repo.dep_file_deps[dep_file.id])
+            ),
+            file=sys.stderr,
+        )
+
     return org_repo
