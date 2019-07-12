@@ -92,9 +92,6 @@ async def aio_delay(item):
 
 
 def do_async(func, *args, **kwds):
-    """
-    """
-
     @functools.wraps(func)
     def wrapper(*fargs, **fkwds):
         return rx.from_future(asyncio.create_task(func(*fargs, **fkwds)))
@@ -106,21 +103,13 @@ def map_async(func, *args, **kwds):
     return op.flat_map(do_async(func, *args, **kwds))
 
 
-def main():
-    args = parse_args()
-    # print(args)
-
-    loop = asyncio.get_event_loop()
-    aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
+def fetch_org_repo_deps_via_gh_meta(auth_token: str, org_repos: "Observable"):
     ghc = gh_client.GHClient(
-        auth_token=args.auth_token,
-        lang_page_size=50,
-        dep_file_page_size=3,
-        dep_page_size=5,
+        auth_token=auth_token, lang_page_size=50, dep_file_page_size=3, dep_page_size=5
     )
 
     # NB: must flat_map to materialize the futures otherwise we receive type rx.core.observable.observable.Observable
-    org_repos = rx.from_iterable(args.org_repos).pipe(
+    org_repos = org_repos.pipe(
         op.map(org_repo_to_OrgRepo), map_async(ghc.get_org_repo_langs)
     )
 
@@ -134,18 +123,16 @@ def main():
         op.flat_map(lambda org_repo: rx.from_iterable(org_repo.iter_dep_file_deps())),
     )
 
+    return ghc, deps
+
+
+def get_npmsio_scores_for_node_deps(deps: "Observable", gh_client):
     npm_deps = deps.pipe(
         op.filter(
             lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2].packageManager
             == "NPM"
         )
     )
-
-    # npm_deps.pipe(op.count(npm_deps)).subscribe(
-    #     on_completed=lambda x: print("found {} npm deps".format(x)),
-    #     on_error=lambda e: print("Count error Occurred: {0}".format(e)),
-    #     scheduler=aio_scheduler,
-    # )
 
     npmsio_scores = npm_deps.pipe(
         op.map(lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2]),
@@ -154,8 +141,23 @@ def main():
         map_async(
             lambda deps: npmsio_client.async_main([dep.packageName for dep in deps])
         ),
-        op.do_action(do_async(ghc.close)),
+        op.do_action(do_async(gh_client.close)),
     )
+
+    return npmsio_scores
+
+
+def main():
+    args = parse_args()
+    # print(args)
+
+    loop = asyncio.get_event_loop()
+    aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
+
+    ghc, deps = fetch_org_repo_deps_via_gh_meta(
+        auth_token=args.auth_token, org_repos=rx.from_iterable(args.org_repos)
+    )
+    npmsio_scores = get_npmsio_scores_for_node_deps(deps, ghc)
 
     def on_next(item):
         # print("Received {0}".format(item))
@@ -164,16 +166,24 @@ def main():
         pass
 
     def on_completed(loop, gh_client):
+        print("npmsio scores fetched")
+        # asyncio.run(asyncio.ensure_future(ghc.close))
         loop.stop()
         print("on_completed Done!")
 
+    # NB: multiple downstream subscribers results in multiple fetches, which we
+    # probably don't want
+
+    # npm_deps.pipe(op.count(npm_deps)).subscribe(
+    # on_completed=lambda x: print("found {} npm deps".format(x)),
+    # on_error=lambda e: print("Count error Occurred: {0}".format(e)),
+    # scheduler=aio_scheduler, )
     npmsio_scores.subscribe(
         on_next=on_next,
         on_error=lambda e: print("Error Occurred: {0}".format(e)),
         on_completed=functools.partial(on_completed, loop=loop, gh_client=ghc),
         scheduler=aio_scheduler,
     )
-
     loop.run_forever()
     print("main done")
 
