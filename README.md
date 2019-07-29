@@ -1,44 +1,23 @@
 ## find-package-rugaru
 
-Scripts for finding suspicious werewolf / rugaru / rougarou-like malware open source packages.
+Scripts for identifying suspicious open source packages and
+dependencies that might be malware once in a blue moon like [the
+legendary rugaru](https://en.wikipedia.org/wiki/Rougarou).
+
+### Strategy
+
+Our goal is to determine the behavior of known packages and find
+predictors of suspicious packages. We break this down into three steps
+for a repo or container image:
+
+1. find dependency manifests and lockfiles (e.g. `package-lock.json`, `requirements.txt`, `Cargo.toml`, `go.mod`)
+2. resolve dependent packages using different install options (e.g. `--prod`, `--ignore-scripts`)
+3. fetch additional metadata about each dependency
+
+env?, repo, commit, image, package manager, command
 
 ### Usage
 
-#### Requirements
-
-
-
-
-### How does this differ from other tools?
-
-* language agnostic
-* sandboxed
-
-### Directions
-
-1. clone this repo (while in development we won't publish)
-
-```console
-git clone https://github.com/mozilla-services/find-package-rugaru.git
-
-```
-
-2. Inspect a container:
-
-```console
-
-```
-
-3. Optionally, we can containerize a repo first from a base image to inspect:
-
-
-```console
-
-```
-
-####
-
-* base docker images names for testing repos (Python, JS, etc.). These should be official or trusted (in the "I wrote this or trust the authors not ) docker images
 
 ### Repo layout
 
