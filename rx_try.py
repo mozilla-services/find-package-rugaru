@@ -22,6 +22,7 @@ from rx.subject import AsyncSubject
 
 import gh_meta_client as gh_client
 import npmsio_client
+import container
 
 
 @dataclass
@@ -37,6 +38,10 @@ class OrgRepo:
     # yet)
     dep_file_query_params: dict = field(default_factory=dict)
 
+    @property
+    def github_clone_url(self) -> str:
+        return "https://github.com/{0.org}/{0.repo}.git".format(self)
+
     def iter_dep_files(self) -> Dict:
         for df in self.dep_files:
             if df and df.node:
@@ -49,6 +54,18 @@ class OrgRepo:
 
             for dep in self.dep_file_deps[df.id]:
                 yield self, df, dep
+
+    @staticmethod
+    def from_org_repo(org_repo):
+        """e.g. mozilla/gecko-dev -> OrgRepo(org=mozilla, repo=gecko-dev)"""
+        return OrgRepo(*org_repo.split("/", 1))
+
+    @staticmethod
+    def from_github_repo_url(repo_url):
+        """e.g. https://github.com/mozilla-services/syncstorage-rs.git -> OrgRepo(org=mozilla-services, repo=syncstorage-rs)
+        """
+        org_repo = repo_url.replace("https://github.com/", "").replace(".git", "")
+        return OrgRepo.from_org_repo(org_repo)
 
 
 # TODO: list tags and sample commits per time period in a cloned repo
@@ -80,10 +97,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def org_repo_to_OrgRepo(org_repo):
-    return OrgRepo(*org_repo.split("/", 1))
-
-
 async def aio_delay(item):
     sleep_dur = random.choice([1, 3])
     print("sleep", sleep_dur, item)
@@ -110,7 +123,7 @@ def fetch_org_repo_deps_via_gh_meta(auth_token: str, org_repos: "Observable"):
 
     # NB: must flat_map to materialize the futures otherwise we receive type rx.core.observable.observable.Observable
     org_repos = org_repos.pipe(
-        op.map(org_repo_to_OrgRepo), map_async(ghc.get_org_repo_langs)
+        op.map(OrgRepo.from_org_repo), map_async(ghc.get_org_repo_langs)
     )
 
     dep_files = org_repos.pipe(
@@ -127,6 +140,7 @@ def fetch_org_repo_deps_via_gh_meta(auth_token: str, org_repos: "Observable"):
 
 
 def get_npmsio_scores_for_node_deps(deps: "Observable", gh_client):
+    # TODO: don't pass gh_client to npmsio score fetch fn
     npm_deps = deps.pipe(
         op.filter(
             lambda org_repo_dep_file_dep: org_repo_dep_file_dep[2].packageManager
@@ -151,41 +165,43 @@ def main():
     args = parse_args()
     # print(args)
 
-    loop = asyncio.get_event_loop()
-    aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
+    cargo_audit_tag = container.build_cargo_audit_container()
 
-    ghc, deps = fetch_org_repo_deps_via_gh_meta(
-        auth_token=args.auth_token, org_repos=rx.from_iterable(args.org_repos)
-    )
-    npmsio_scores = get_npmsio_scores_for_node_deps(deps, ghc)
+    repo_url = "https://github.com/mozilla-services/syncstorage-rs.git"
+    org_repo = OrgRepo.from_github_repo_url(repo_url)
+    print(container.cargo_audit_repo(org_repo))
 
-    def on_next(item):
-        # print("Received {0}".format(item))
-        print("Received {0} {1}".format(type(item), len(item)))
-        # print("Received {0.org}/{0.repo} {1.blobPath} {2}".format(*item))
-        pass
+    # loop = asyncio.get_event_loop()
+    # aio_scheduler = AsyncIOScheduler(loop=loop)  # NB: not thread safe
 
-    def on_completed(loop, gh_client):
-        print("npmsio scores fetched")
-        # asyncio.run(asyncio.ensure_future(ghc.close))
-        loop.stop()
-        print("on_completed Done!")
+    # ghc, deps = fetch_org_repo_deps_via_gh_meta(
+    #     auth_token=args.auth_token, org_repos=rx.from_iterable(args.org_repos)
+    # )
+    # npmsio_scores = get_npmsio_scores_for_node_deps(deps, ghc)
 
-    # NB: multiple downstream subscribers results in multiple fetches, which we
-    # probably don't want
+    # def on_next(item):
+    #     # print("Received {0}".format(item))
+    #     print("Received {0} {1}".format(type(item), len(item)))
+    #     # print("Received {0.org}/{0.repo} {1.blobPath} {2}".format(*item))
+    #     pass
 
-    # npm_deps.pipe(op.count(npm_deps)).subscribe(
-    # on_completed=lambda x: print("found {} npm deps".format(x)),
-    # on_error=lambda e: print("Count error Occurred: {0}".format(e)),
-    # scheduler=aio_scheduler, )
-    npmsio_scores.subscribe(
-        on_next=on_next,
-        on_error=lambda e: print("Error Occurred: {0}".format(e)),
-        on_completed=functools.partial(on_completed, loop=loop, gh_client=ghc),
-        scheduler=aio_scheduler,
-    )
-    loop.run_forever()
-    print("main done")
+    # def on_completed(loop, gh_client):
+    #     print("npmsio scores fetched")
+    #     # asyncio.run(asyncio.ensure_future(ghc.close))
+    #     loop.stop()
+    #     print("on_completed Done!")
+
+    # # NB: multiple downstream subscribers results in multiple fetches, which we
+    # # probably don't want
+
+    # npmsio_scores.subscribe(
+    #     on_next=on_next,
+    #     on_error=lambda e: print("Error Occurred: {0}".format(e)),
+    #     on_completed=functools.partial(on_completed, loop=loop, gh_client=ghc),
+    #     scheduler=aio_scheduler,
+    # )
+    # loop.run_forever()
+    # print("main done")
 
 
 if __name__ == "__main__":
