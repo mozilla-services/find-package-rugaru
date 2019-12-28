@@ -3,7 +3,7 @@ black
 coverage
 hashin
 mypy-extensions
-mypy==0.720
+mypy==0.761
 pytest-asyncio
 pytest-codestyle
 pytest-cov
