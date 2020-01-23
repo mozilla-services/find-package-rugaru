@@ -78,6 +78,25 @@ run-crate-graph:
 	$(FPR) -q crate_graph -i tests/fixtures/cargo_metadata_serialized.json | jq -r '.crate_graph_pdot' | dot -Tsvg > fpr-graph.svg
 	$(IN_VENV) python -m webbrowser fpr-graph.svg
 
+start-db:
+	docker run --name dep-obs-postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=dependency_observatory -d postgres:12
+
+stop-db:
+	docker stop dep-obs-postgres
+
+clean-db:
+	docker rm -f dep-obs-postgres
+
+db-shell:
+	PGPASSWORD=postgres psql -U postgres -h localhost -p 5432 dependency_observatory
+
+dump-db:
+	mkdir -p "dep_obs_dump_$(shell date --utc +%F)/"
+	PGPASSWORD=postgres pg_dump -j $(shell nproc --all) -U postgres -h localhost -p 5432 -Fd dependency_observatory -f "dep_obs_dump_$(shell date --utc +%F)/"
+
+run-save-to-db:
+	cat 00_repo_url.json | $(FPR) save_to_db --create-tables
+
 run-crate-graph-and-save:
 	$(FPR) crate_graph -i tests/fixtures/cargo_metadata_serialized.json -o crate_graph.jsonl --dot-filename default.dot
 	$(FPR) crate_graph -i tests/fixtures/cargo_metadata_serialized.json -a crate_graph.jsonl -o /dev/null --node-key name --node-label name_authors --filter dpc --filter serde --dot-filename serde_authors_filtered.dot

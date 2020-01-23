@@ -22,6 +22,9 @@ def load_test_fixture(filename: str, load_fn: Callable) -> Any:
 
 @pytest.mark.parametrize("pipeline", pipelines, ids=lambda p: p.name)
 def test_serialize_returns_audit_result(pipeline):
+    if pipeline.name == "save_to_db":
+        return pytest.xfail("save to DB doesn't write output")
+
     unserialized = load_test_fixture(
         "{}_unserialized.pickle".format(pipeline.name), pickle.load
     )

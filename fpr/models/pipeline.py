@@ -1,3 +1,4 @@
+import os
 import argparse
 import sys
 from dataclasses import dataclass, field
@@ -39,10 +40,14 @@ def add_infile_and_outfile(
 
 def add_db_arg(pipeline_parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     pipeline_parser.add_argument(
-        "--db",
+        "--db-url",
         type=str,
-        default=":memory:",
-        help="SQLite3 database name to save crates io metadata to. Defaults to :memory:",
+        default=os.environ.get(
+            "DB_URL",
+            "postgresql+psycopg2://postgres:postgres@localhost/dependency_observatory",
+        ),
+        help="Postgres DB URL. Defaults to env var DB_URL then "
+        " 'postgresql+psycopg2://postgres:postgres@localhost/dependency_observatory'",
     )
     return pipeline_parser
 
