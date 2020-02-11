@@ -42,7 +42,7 @@ type-check:
 	$(IN_VENV) mypy fpr/
 
 style-check:
-	$(IN_VENV) pytest -v -o codestyle_max_line_length=120 --codestyle fpr/ tests/
+	$(IN_VENV) pytest fpr/ tests/
 
 shellcheck:
 	shellcheck -s bash -x bin/*.sh
