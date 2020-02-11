@@ -79,7 +79,14 @@ async def run_cargo_metadata(item: Tuple[OrgRepo, GitRef]):
     ) as c:
         await containers.ensure_repo(c, org_repo.github_clone_url)
         await containers.ensure_ref(c, git_ref, working_dir="/repo")
-        branch, commit, tag, ripgrep_version, cargo_version, rustc_version = await asyncio.gather(
+        (
+            branch,
+            commit,
+            tag,
+            ripgrep_version,
+            cargo_version,
+            rustc_version,
+        ) = await asyncio.gather(
             containers.get_branch(c),
             containers.get_commit(c),
             containers.get_tag(c),
