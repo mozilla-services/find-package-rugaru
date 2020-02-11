@@ -298,7 +298,7 @@ def group_by_org_repo_ref_path(
 
 
 def iter_task_envs(
-    args: argparse.Namespace
+    args: argparse.Namespace,
 ) -> Generator[
     Tuple[Language, PackageManager, DockerImage, ChainMap, List[ContainerTask]],
     None,
