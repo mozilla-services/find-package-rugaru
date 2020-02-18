@@ -261,7 +261,7 @@ async def run_in_repo_at_ref(
             yield result
 
 
-DepFileRow = Tuple[OrgRepo, GitRef, DependencyFile]
+DepFileRow = Tuple[OrgRepo, GitRef, DependencyFile, Dict]
 
 
 def group_by_org_repo_ref_path(
@@ -272,29 +272,47 @@ def group_by_org_repo_ref_path(
         (
             OrgRepo(item["org"], item["repo"]),
             GitRef.from_dict(item["ref"]),
-            DependencyFile.from_dict(item["dependency_file"]),
+            [DependencyFile.from_dict(df) for df in item["dependency_files"]],
+            item,
         )
         for item in source
     ]
-
     # sort in-place by org repo then ref value (sorted is stable)
     sorted(rows, key=lambda row: row[0].org_repo)
     sorted(rows, key=lambda row: row[1].value)
 
+    for row in rows:
+        sorted(row[2], key=lambda r: r.path)
+
+    if all(len(row[2]) > 0 for row in rows):
+        sorted(rows, key=lambda row: row[2][0].sha256)
+    if all(len(row[2]) > 1 for row in rows):
+        sorted(rows, key=lambda row: row[2][1].sha256)
+
     # group by org repo then ref value
     for org_repo_ref_key, group_iter in itertools.groupby(
-        rows, key=lambda row: (row[0].org_repo, row[1].value)
+        rows,
+        key=lambda row: (
+            row[0].org_repo,
+            row[1].value,
+            row[2][0].sha256,
+            row[2][1].sha256 if len(row[2]) > 1 else None,
+        ),
     ):
-        org_repo_key, ref_value_key = org_repo_ref_key
+        (
+            org_repo_key,
+            ref_value_key,
+            first_dep_file_sha256,
+            second_dep_file_sha256,
+        ) = org_repo_ref_key
         org_repo_ref_rows = list(group_iter)
 
-        # sort and group by path parent e.g. /foo/bar for /foo/bar/package.json
-        sorted(org_repo_ref_rows, key=lambda row: row[2].path.parent)
-        for dep_file_parent_key, inner_group_iter in itertools.groupby(
-            org_repo_ref_rows, key=lambda row: row[2].path.parent
-        ):
-            file_rows = list(inner_group_iter)
-            yield (org_repo_key, ref_value_key, dep_file_parent_key), file_rows
+        yield (
+            org_repo_key,
+            ref_value_key,
+            first_dep_file_sha256,
+            second_dep_file_sha256,
+        ), org_repo_ref_rows
 
 
 def iter_task_envs(

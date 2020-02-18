@@ -74,6 +74,59 @@ def parse_args(pipeline_parser: argparse.ArgumentParser) -> argparse.ArgumentPar
 
 # want: (repo, ref/tag, dep_files w/ hashes, deps, [dep. stats or vuln. stats] (join for final analysis))
 
+DepFileRow = Tuple[OrgRepo, GitRef, DependencyFile, Dict]
+
+
+def group_by_org_repo_ref_path(
+    source: Generator[Dict[str, Any], None, None]
+) -> Generator[Tuple[Tuple[str, str, pathlib.Path], List[DepFileRow]], None, None]:
+    # read all input rows into memory
+    rows: List[DepFileRow] = [
+        (
+            OrgRepo(item["org"], item["repo"]),
+            GitRef.from_dict(item["ref"]),
+            [DependencyFile.from_dict(df) for df in item["dependency_files"]],
+            item,
+        )
+        for item in source
+    ]
+    # sort in-place by org repo then ref value (sorted is stable)
+    sorted(rows, key=lambda row: row[0].org_repo)
+    sorted(rows, key=lambda row: row[1].value)
+
+    for row in rows:
+        sorted(row[2], key=lambda r: r.path)
+
+    if all(len(row[2]) > 0 for row in rows):
+        sorted(rows, key=lambda row: row[2][0].sha256)
+    if all(len(row[2]) > 1 for row in rows):
+        sorted(rows, key=lambda row: row[2][1].sha256)
+
+    # group by org repo then ref value
+    for org_repo_ref_key, group_iter in itertools.groupby(
+        rows,
+        key=lambda row: (
+            row[0].org_repo,
+            row[1].value,
+            row[2][0].sha256,
+            row[2][1].sha256 if len(row[2]) > 1 else None,
+        ),
+    ):
+        (
+            org_repo_key,
+            ref_value_key,
+            first_dep_file_sha256,
+            second_dep_file_sha256,
+        ) = org_repo_ref_key
+        org_repo_ref_rows = list(group_iter)
+
+        yield (
+            org_repo_key,
+            ref_value_key,
+            first_dep_file_sha256,
+            second_dep_file_sha256,
+        ), org_repo_ref_rows
+
 
 def parse_stdout_as_json(stdout: Optional[str]) -> Optional[Dict]:
     if stdout is None:
@@ -260,14 +313,18 @@ async def run_pipeline(
 ) -> AsyncGenerator[Dict, None]:
     log.info(f"{pipeline.name} pipeline started")
 
-    for i, line in enumerate(source):
-        # filter for node list_metadata output to parse and flatten deps
-        task_name = get_in(line, ["task", "name"], None)
-        if task_name not in args.repo_task:
-            continue
-
+    for (
+        (org_repo_key, ref_value_key, first_dep_file_sha256, second_dep_file_sha256),
+        rows,
+    ) in group_by_org_repo_ref_path(source):
+        task_names = [get_in(row[-1], ["task", "name"], None) for row in rows]
+        dep_files = [row[2] for row in rows]
+        # print(
+        #     f"{org_repo_key} {ref_value_key} {first_dep_file_sha256} {second_dep_file_sha256}"
+        #     f" task ns: {task_names}"
+        # )
         result = extract_fields(
-            line,
+            rows[0][-1],
             [
                 "branch",
                 "commit",
@@ -279,48 +336,54 @@ async def run_pipeline(
                 "dependency_files",
             ],
         )
-        result["task"] = extract_fields(
-            line["task"],
-            [
-                "command",
-                "container_name",
-                "exit_code",
-                "name",
-                "relative_path",
-                "working_dir",
-            ],
-        )
+        result["tasks"] = dict()
+        for *_, line in rows:
+            task_name = get_in(line, ["task", "name"], None)
+            if task_name not in args.repo_task:
+                continue
 
-        task_command = get_in(line, ["task", "command"], None)
-        if any(
-            task_command == task.command
-            for task in package_managers["npm"].tasks.values()
-        ):
-            updates = parse_npm_task(task_name, line)
-        elif any(
-            task_command == task.command
-            for task in package_managers["yarn"].tasks.values()
-        ):
-            updates = parse_yarn_task(task_name, line)
-        else:
-            continue
+            result["tasks"][task_name] = extract_fields(
+                line["task"],
+                [
+                    "command",
+                    "container_name",
+                    "exit_code",
+                    "name",
+                    "relative_path",
+                    "working_dir",
+                ],
+            )
 
-        if updates:
-            if task_name == "list_metadata":
-                log.info(
-                    f"wrote {result['task']['name']} {result['org']}/{result['repo']} {result['task']['relative_path']}"
-                    f" {result['ref']['value']} w/"
-                    f" {updates['dependencies_count']} deps and {updates.get('problems_count', 0)} problems"
-                    # f" {updates['graph_stats']}"
-                )
-            elif task_name == "audit":
-                log.info(
-                    f"wrote {result['task']['name']} {result['org']}/{result['repo']} {result['task']['relative_path']}"
-                    f" {result['ref']['value']} w/"
-                    f" {updates['vulnerabilities_count']} vulns"
-                )
-            result.update(updates)
-            yield result
+            task_command = get_in(line, ["task", "command"], None)
+            if any(
+                task_command == task.command
+                for task in package_managers["npm"].tasks.values()
+            ):
+                updates = parse_npm_task(task_name, line)
+            elif any(
+                task_command == task.command
+                for task in package_managers["yarn"].tasks.values()
+            ):
+                updates = parse_yarn_task(task_name, line)
+            else:
+                continue
+
+            if updates:
+                if task_name == "list_metadata":
+                    log.info(
+                        f"wrote {result['tasks'][task_name]['name']} {result['org']}/{result['repo']} {result['tasks'][task_name]['relative_path']}"
+                        f" {result['ref']['value']} w/"
+                        f" {updates['dependencies_count']} deps and {updates.get('problems_count', 0)} problems"
+                        # f" {updates['graph_stats']}"
+                    )
+                elif task_name == "audit":
+                    log.info(
+                        f"wrote {result['tasks'][task_name]['name']} {result['org']}/{result['repo']} {result['tasks'][task_name]['relative_path']}"
+                        f" {result['ref']['value']} w/"
+                        f" {updates['vulnerabilities_count']} vulns"
+                    )
+                result["tasks"][task_name].update(updates)
+        yield result
 
 
 FIELDS: AbstractSet = set()
