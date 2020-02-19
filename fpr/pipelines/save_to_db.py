@@ -22,6 +22,7 @@ from typing import (
 )
 import typing
 
+import sqlalchemy
 from sqlalchemy import tuple_
 from sqlalchemy.orm import Load, load_only
 
@@ -93,6 +94,36 @@ VIEWS_AND_INDEXES = [
 ]
 
 
+def get_package_version_link_id_query(
+    session: sqlalchemy.orm.Session, link: Tuple[int, int]
+) -> None:  # some sort of query
+    parent_package_id, child_package_id = link
+    return session.query(PackageLink.id).filter_by(
+        parent_package_id=parent_package_id, child_package_id=child_package_id,
+    )
+
+
+def get_package_version_id_query(
+    session: sqlalchemy.orm.Session, pkg: Dict
+) -> None:  # some sort of query
+    return session.query(PackageVersion.id).filter_by(
+        name=pkg["name"], version=pkg["version"], language="node",
+    )
+
+
+def add_new_package_version(session: sqlalchemy.orm.Session, pkg: Dict) -> None:
+    get_package_version_id_query(session, pkg).one_or_none() or session.add(
+        PackageVersion(
+            name=pkg.get("name", None),
+            version=pkg.get("version", None),
+            language="node",
+            url=pkg.get(
+                "resolved", None
+            ),  # is null for the root for npm list and yarn list output
+        )
+    )
+
+
 async def run_pipeline(
     source: Generator[Dict[str, Any], None, None], args: argparse.Namespace
 ) -> None:
@@ -114,118 +145,56 @@ async def run_pipeline(
 
     # use input type since it could write to multiple tables
     with create_session(engine) as session:
-        # if args.input_type == "repo_url":
-        #     rows = (Repo(url=line["repo_url"], refs=[]) for line in source)
-        #     session.add_all(rows)
-        #     session.commit()
-        # elif args.input_type == "git_ref":
-        #     rows = (
-        #         Ref(
-        #             tag=line["ref"]["value"] if line["ref"]["kind"] == "tag" else None,
-        #             commit=line["ref"]["value"]
-        #             if line["ref"]["kind"] == "commit"
-        #             else None,  # TODO: add ref commit back from repo task run versions output?
-        #             commit_ts=datetime.utcfromtimestamp(int(line["ref"]["commit_ts"])),
-        #             repo_id=session.query(Repo)
-        #             .filter_by(url=line["repo_url"].replace(".git", ""))[0]
-        #             .id,
-        #             dep_files=[],
-        #         )
-        #         for line in source
-        #     )
-        #     session.add_all(rows)
-        #     session.commit()
-        # elif args.input_type == "dep_file":
-        #     for line in source:
-        #         # TODO: replace with DB IDs?
-        #         assert line["ref"]["kind"] == "tag"
-        #         repo_id = (
-        #             session.query(Repo)
-        #             .filter_by(url=line["repo_url"].replace(".git", ""))
-        #             .first()
-        #             .id
-        #         )
-        #         ref = (
-        #             session.query(Ref)
-        #             .filter_by(repo_id=repo_id, tag=line["ref"]["value"],)
-        #             .first()
-        #         )
-
-        #         # find the dep file
-        #         dep_files = session.query(DependencyFile).filter_by(
-        #             path=line["dependency_file"]["path"],
-        #             sha2=line["dependency_file"]["sha256"],
-        #         )
-        #         if dep_files.count() == 0:
-        #             session.add(
-        #                 DependencyFile(
-        #                     path=line["dependency_file"]["path"],
-        #                     sha2=line["dependency_file"]["sha256"],
-        #                     refs=[ref],
-        #                 )
-        #             )
-        #         else:
-        #             assert dep_files.count() == 1
-        #             dep_file = (
-        #                 session.query(DependencyFile)
-        #                 .filter_by(
-        #                     path=line["dependency_file"]["path"],
-        #                     sha2=line["dependency_file"]["sha256"],
-        #                 )
-        #                 .first()
-        #             )
-        #             dep_file.refs.append(ref)
-        #         session.commit()
-        if args.input_type == "repo_task":
-            for line in source:
-                if line["task"]["name"] not in ["audit", "list_metadata"]:
-                    continue
-
-                dep_files = session.query(DependencyFile).filter(
-                    tuple_(DependencyFile.sha2, DependencyFile.path).in_(
-                        [
-                            (dep_file["sha256"], dep_file["path"])
-                            for dep_file in line["dependency_files"]
-                        ]
-                    )
-                )
-
-                stdout = (
-                    parse_stdout_as_jsonlines(line["task"]["stdout"])
-                    if ("yarn" in line["task"]["command"])
-                    else parse_stdout_as_json(line["task"]["stdout"])
-                )
-                task = RepoTask(
-                    name=line["task"]["name"],
-                    command=line["task"]["command"],
-                    exit_code=line["task"]["exit_code"],
-                    versions=line["versions"],
-                    stdout=stdout,
-                    dep_files=list(dep_files),
-                )
-                session.add(task)
-            session.commit()
         if args.input_type == "postprocessed_repo_task":
             for line in source:
                 for task_data in line["tasks"].values():
                     if task_data["name"] == "list_metadata":
-                        rows = (
-                            PackageVersion(
-                                name=dep.get("name", None),
-                                version=dep.get("version", None),
-                                language="node",
-                                # extra=dict(
-                                #     source_url=dep.get("resolved", None),  # is null for the root for npm list and yarn list output
-                                #     # repo_task_id=task.id,
-                                # )
-                                # dependents=list(
-                                #     dep.get("dependencies", [])
-                                # ),  # is fully qualified for npm, semver for yarn
+
+                        link_ids = []
+                        for task_dep in task_data.get("dependencies", []):
+                            add_new_package_version(session, task_dep)
+                            session.commit()
+                            parent_package_id = get_package_version_id_query(
+                                session, task_dep
+                            ).first()
+
+                            for dep in task_dep.get("dependencies", []):
+                                # is fully qualified semver for npm (or file: or github: url), semver for yarn
+                                name, version = dep.rsplit("@", 1)
+                                child_package_id = get_package_version_id_query(
+                                    session, dict(name=name, version=version)
+                                ).first()
+
+                                link_id = get_package_version_link_id_query(
+                                    session, (parent_package_id, child_package_id)
+                                ).one_or_none()
+                                if not link_id:
+                                    session.add(
+                                        PackageLink(
+                                            child_package_id=child_package_id,
+                                            parent_package_id=parent_package_id,
+                                        )
+                                    )
+                                    session.commit()
+                                    link_id = get_package_version_link_id_query(
+                                        session, (parent_package_id, child_package_id)
+                                    ).first()
+                                link_ids.append(link_id)
+
+                        session.add(
+                            PackageGraph(
+                                root_package_version_id=get_package_version_id_query(
+                                    session, task_data["root"]
+                                ).first()
+                                if task_data["root"]
+                                else None,
+                                link_ids=link_ids,
+                                package_manager="yarn"
+                                if "yarn" in task_data["command"]
+                                else "npm",
+                                package_manager_version=None,
                             )
-                            for dep in task_data.get("dependencies", [])
                         )
-                        session.add_all(rows)
-                        session.commit()
                     elif task_data["name"] == "audit":
                         pass
                         # # yarn has .advisory and .resolution
@@ -252,42 +221,6 @@ async def run_pipeline(
                         # )
                         # session.add_all(rows)
                         # session.commit()
-        # elif args.input_type == "dep_meta_npm_reg":
-        #     for line in source:
-        #         rows = (
-        #             DependencyMetadata(
-        #                 package_name=line["name"],
-        #                 package_version=version,
-        #                 source_name="npm_registry",
-        #                 source_url=f"https://registry.npmjs.com/{line['name']}",
-        #                 result=version_data,
-        #             )
-        #             for version, version_data in line["versions"].items()
-        #         )
-        #         session.add_all(rows)
-        #         # save version specific data and all data
-        #         session.add(
-        #             DependencyMetadata(
-        #                 package_name=line["name"],
-        #                 source_name="npm_registry",
-        #                 source_url=f"https://registry.npmjs.com/{line['name']}",
-        #                 result=line,
-        #             )
-        #         )
-        #     session.commit()
-        # elif args.input_type == "dep_meta_npmsio":
-        #     rows = (
-        #         DependencyMetadata(
-        #             package_name=line["collected"]["metadata"]["name"],
-        #             package_version=line["collected"]["metadata"]["version"],
-        #             source_name="npmsio",
-        #             source_url=f"https://api.npms.io/v2/package/{line['collected']['metadata']['name']}",
-        #             result=line,
-        #         )
-        #         for line in source
-        #     )
-        #     session.add_all(rows)
-        #     session.commit()
         else:
             raise NotImplementedError()
 
