@@ -48,7 +48,10 @@ class PackageVersion(Base):
     version = Column(String, nullable=False, primary_key=True)
     language = Column(lang_enum, nullable=False, primary_key=True)
 
-    # has a source repository and commit
+    # has an optional distribution URL
+    url = deferred(Column(String, nullable=True))
+
+    # has an optional source repository and commit
     repo_url = deferred(Column(String, nullable=True))
     repo_commit = deferred(Column(LargeBinary, nullable=True))
 
@@ -134,8 +137,8 @@ class PackageGraph(Base):
     link_ids = Column(ARRAY(Integer))  # ForeignKey("package_version_links.id"))
 
     # what resolved it
-    package_manager = deferred(Column(package_manager_enum, nullable=False))
-    package_manager_version = deferred(Column(String, nullable=False))
+    package_manager = deferred(Column(package_manager_enum, nullable=True))
+    package_manager_version = deferred(Column(String, nullable=True))
 
     # track when it was created
     created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
