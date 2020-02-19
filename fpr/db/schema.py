@@ -3,6 +3,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     LargeBinary,
     Index,
     Integer,
@@ -51,9 +52,6 @@ class PackageVersion(Base):
     repo_url = deferred(Column(String, nullable=True))
     repo_commit = deferred(Column(LargeBinary, nullable=True))
 
-    # has unstructured metadata from various sources
-    extra = deferred(Column(JSONB, nullable=True))
-
     # track when it was created and changed
     created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
     updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
@@ -84,10 +82,10 @@ class PackageLink(Base):
     )
 
     child_package_id = Column(
-        Integer, ForeignKey("package_versions.id"), primary_key=True
+        Integer, primary_key=True, nullable=False,  # ForeignKey("package_versions.id"),
     )
     parent_package_id = Column(
-        Integer, ForeignKey("package_versions.id"), primary_key=True
+        Integer, primary_key=True, nullable=False,  # ForeignKey("package_versions.id"),
     )
 
     # track when it was created
@@ -96,6 +94,18 @@ class PackageLink(Base):
     @declared_attr
     def __table_args__(cls):
         return (
+            # ForeignKeyConstraint(
+            #     ["child_package_id"],
+            #     [
+            #         "package_versions.id",
+            #     ],
+            # ),
+            # ForeignKeyConstraint(
+            #     ["parent_package_id"],
+            #     [
+            #         "package_versions.id",
+            #     ],
+            # ),
             Index(
                 f"{cls.__tablename__}_unique_idx",
                 "child_package_id",
@@ -117,7 +127,7 @@ class PackageGraph(Base):
 
     # package version did we resolved
     root_package_version_id = Column(
-        Integer, ForeignKey("package_versions.id"), nullable=False, primary_key=True
+        Integer, nullable=False, primary_key=True,  # ForeignKey("package_versions.id"),
     )
 
     # link ids of direct and transitive deps
@@ -130,6 +140,23 @@ class PackageGraph(Base):
     # track when it was created
     created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
 
-
-# TODO: add indexes
-# Index('', mytable.c.col5, mytable.c.col6, unique=True)
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            Index(
+                f"{cls.__tablename__}_root_package_id_idx", "root_package_version_id",
+            ),
+            Index(
+                f"{cls.__tablename__}_link_ids_idx", "link_ids", postgresql_using="gin",
+            ),
+            Index(f"{cls.__tablename__}_package_manager_idx", "package_manager",),
+            Index(
+                f"{cls.__tablename__}_package_manager_version_idx",
+                "package_manager_version",
+            ),
+            Index(
+                f"{cls.__tablename__}_created_idx",
+                "created_at",
+                expression.desc(cls.created_at),
+            ),
+        )
