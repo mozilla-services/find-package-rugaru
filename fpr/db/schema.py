@@ -40,9 +40,7 @@ package_manager_enum = ENUM("npm", "yarn", name="package_manager_enum")
 class PackageVersion(Base):
     __tablename__ = "package_versions"
 
-    id = Column(
-        Integer, Sequence("package_version_id_seq"), primary_key=True, unique=True
-    )
+    id = Column(Integer, Sequence("package_version_id_seq"), primary_key=True)
 
     # has a name, resolved version, and language
     name = Column(String, nullable=False, primary_key=True)
@@ -59,6 +57,23 @@ class PackageVersion(Base):
     # track when it was created and changed
     created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
     updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
+
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            Index(
+                f"{cls.__tablename__}_unique_idx",
+                "name",
+                "version",
+                "language",
+                unique=True,
+            ),
+            Index(
+                f"{cls.__tablename__}_created_idx",
+                "created_at",
+                expression.desc(cls.created_at),
+            ),
+        )
 
 
 class PackageLink(Base):
@@ -78,13 +93,24 @@ class PackageLink(Base):
     # track when it was created
     created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
 
-    # @declared_attr
-    # def __table_args__(cls):
-    #     return (Index(f'{cls.__tablename__}_idx', 'a', 'b'),)
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            Index(
+                f"{cls.__tablename__}_unique_idx",
+                "child_package_id",
+                "parent_package_id",
+                unique=True,
+            ),
+            Index(
+                f"{cls.__tablename__}_created_idx",
+                "created_at",
+                expression.desc(cls.created_at),
+            ),
+        )
 
 
-
-class PackageGraphs(Base):
+class PackageGraph(Base):
     __tablename__ = "package_graphs"
 
     id = Column(Integer, Sequence("package_graphs_id_seq"), primary_key=True)
@@ -95,7 +121,7 @@ class PackageGraphs(Base):
     )
 
     # link ids of direct and transitive deps
-    link_ids = Column(ARRAY(Integer)) # ForeignKey("package_version_links.id"))
+    link_ids = Column(ARRAY(Integer))  # ForeignKey("package_version_links.id"))
 
     # what resolved it
     package_manager = deferred(Column(package_manager_enum, nullable=False))
