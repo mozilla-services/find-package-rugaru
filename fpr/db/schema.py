@@ -3,188 +3,107 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    LargeBinary,
+    Index,
     Integer,
     Sequence,
     String,
     Table,
     UniqueConstraint,
 )
+from sqlalchemy.sql import func
 from sqlalchemy.orm import deferred, relationship
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.declarative import declarative_base, declared_attr
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB
+
+from sqlalchemy.sql import expression
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import DateTime
+
+
+class utcnow(expression.FunctionElement):
+    type = DateTime()
+
+
+@compiles(utcnow, "postgresql")
+def pg_utcnow(element, compiler, **kw):
+    return "TIMEZONE('utc', CURRENT_TIMESTAMP)"
 
 
 Base: sqlalchemy.ext.declarative.declarative_base = declarative_base()
 
 
-class Repo(Base):
-    __tablename__ = "repos"
-
-    id = Column(Integer, Sequence("repo_id_seq"), primary_key=True)
-    url = Column(String, nullable=False, unique=True)
-
-    # each repo has one or more refs
-    refs = relationship("Ref", backref="repo")
+lang_enum = ENUM("node", "rust", "python", name="language_enum")
+package_manager_enum = ENUM("npm", "yarn", name="package_manager_enum")
 
 
-ref_dep_files = Table(
-    "ref_dep_files",
-    Base.metadata,
-    Column("ref_id", Integer, ForeignKey("refs.id")),
-    Column("dep_file_id", Integer, ForeignKey("dep_files.id")),
-)
+class PackageVersion(Base):
+    __tablename__ = "package_versions"
 
-task_dep_files = Table(
-    "task_dep_files",
-    Base.metadata,
-    Column("repo_task_id", Integer, ForeignKey("repo_tasks.id")),
-    Column("dep_file_id", Integer, ForeignKey("dep_files.id")),
-)
-
-# dep_vulns = Table(
-#     "dep_vulns",
-#     Base.metadata,
-#     Column("dep_id", Integer, ForeignKey("deps.id")),
-#     Column("vuln_id", Integer, ForeignKey("vulns.id")),
-# )
-
-
-class Ref(Base):
-    __tablename__ = "refs"
-
-    id = Column(Integer, Sequence("ref_id_seq"), primary_key=True)
-
-    # each repo ref has an optional branch, tag, commit hash, and commit time
-    branch = Column(String, nullable=True)
-    tag = Column(String, nullable=True)
-    commit = Column(String(length=40), nullable=True)
-    commit_ts = Column(DateTime(timezone=False), nullable=True)
-
-    # has a repo
-    repo_id = Column(Integer, ForeignKey("repos.id"))
-
-    # has one or more dep files
-    dep_files = relationship(
-        "DependencyFile", secondary=ref_dep_files, back_populates="refs"
+    id = Column(
+        Integer, Sequence("package_version_id_seq"), primary_key=True, unique=True
     )
 
-
-class DependencyFile(Base):
-    __tablename__ = "dep_files"
-    __tableargs__ = (UniqueConstraint("sha2", "path"),)
-
-    # a dependency file (manifest or lock) has one or more refs
-    id = Column(Integer, Sequence("dep_files_id_seq"), primary_key=True)
-
-    # has a path including a directory and filename
-    path = Column(String, nullable=False)
-    # has a SHA2 sum
-    sha2 = Column(String, nullable=False)
-
-    # has one or more refs
-    refs = relationship("Ref", secondary=ref_dep_files, back_populates="dep_files")
-
-    # has one or more tasks
-    repo_tasks = relationship(
-        "RepoTask", secondary=task_dep_files, back_populates="dep_files"
-    )
-
-
-class RepoTask(Base):
-    __tablename__ = "repo_tasks"
-
-    id = Column(Integer, Sequence("repo_task_id_seq"), primary_key=True)
-
-    # has one or more dep files
-    dep_files = relationship(
-        "DependencyFile", secondary=task_dep_files, back_populates="repo_tasks"
-    )
-
-    # has one or deps
-    deps = relationship("Dependency", backref="repo_tasks")
-
-    # has a name (e.g. list_metadata, audit)
-    name = Column(String, nullable=False)
-
-    # has a command (e.g. yarn audit --json and exit code)
-    command = Column(String, nullable=False)
-    exit_code = Column(Integer)
-
-    # has jsonb stdout output
-    stdout = deferred(Column(JSONB, nullable=False))
-
-    # has a jsonb versions object
-    versions = deferred(Column(JSONB))
-
-
-class Dependency(Base):
-    __tablename__ = "deps"
-
-    # from postprocess output
-
-    id = Column(Integer, Sequence("dep_id_seq"), primary_key=True)
-
-    # has a name and resolved version
+    # has a name, resolved version, and language
     name = Column(String, nullable=False, primary_key=True)
-    version = Column(String, nullable=False)
-    url = Column(String)
+    version = Column(String, nullable=False, primary_key=True)
+    language = Column(lang_enum, nullable=False, primary_key=True)
 
-    # has an inserting task (with one or more dep files)
-    task = relationship("RepoTask")
-    repo_task_id = Column(Integer, ForeignKey("repo_tasks.id"))
+    # has a source repository and commit
+    repo_url = deferred(Column(String, nullable=True))
+    repo_commit = deferred(Column(LargeBinary, nullable=True))
 
-    # has dependents possibly without fully resolved versions
-    dependents = deferred(Column(JSONB))
+    # has unstructured metadata from various sources
+    extra = deferred(Column(JSONB, nullable=True))
 
-    # vulns = relationship("Vulnerability", secondary=dep_vulns, back_populates="deps")
-    ref_id = Column("ref_id", Integer, ForeignKey("refs.id"))
-
-    # join by ref_id to dep files to find dep_files
-
-
-class Vulnerability(Base):
-    __tablename__ = "vulns"
-
-    # from postprocess output
-
-    id = Column(Integer, Sequence("vuln_id_seq"), primary_key=True)
-
-    # has optional name, version, npm advisory id, and url
-    name = Column(String)
-    version = Column(String)
-    npm_advisory_id = Column(Integer)
-    url = Column(String)
-
-    # has an inserting task (with one or more dep files)
-    task = relationship("RepoTask")
-    repo_task_id = Column(Integer, ForeignKey("repo_tasks.id"))
-
-    # the advisory JSON at .advisories{k, v} for npm; .advisories[].advisory for yarn
-    advisory = deferred(Column(JSONB))
-
-    ref_id = Column("ref_id", Integer, ForeignKey("refs.id"))
-
-    # has one or more affected deps
-    # TODO: pull and populate this from findings[].paths[] (use version)
-    # deps = relationship("Dependency", secondary=dep_vulns, back_populates="vulns")
-
-    # join by ref_id to dep files to find dep_files
+    # track when it was created and changed
+    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
 
 
-class DependencyMetadata(Base):
-    __tablename__ = "deps_meta"  # has a name and version
+class PackageLink(Base):
+    __tablename__ = "package_version_links"
 
-    id = Column(Integer, Sequence("deps_meta_id_seq"), primary_key=True)
+    id = Column(
+        Integer, Sequence("package_version_link_id_seq"), primary_key=True, unique=True
+    )
 
-    package_name = Column(String, nullable=False)
+    child_package_id = Column(
+        Integer, ForeignKey("package_versions.id"), primary_key=True
+    )
+    parent_package_id = Column(
+        Integer, ForeignKey("package_versions.id"), primary_key=True
+    )
 
-    # optional version
-    package_version = Column(String)
+    # track when it was created
+    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
 
-    # has a source e.g. github, npms.io, npm reg., crates.io
-    source_name = Column(String, nullable=False)
+    # @declared_attr
+    # def __table_args__(cls):
+    #     return (Index(f'{cls.__tablename__}_idx', 'a', 'b'),)
 
-    source_url = Column(String)
 
-    # has a jsonb result
-    result = deferred(Column(JSONB, nullable=False))
+
+class PackageGraphs(Base):
+    __tablename__ = "package_graphs"
+
+    id = Column(Integer, Sequence("package_graphs_id_seq"), primary_key=True)
+
+    # package version did we resolved
+    root_package_version_id = Column(
+        Integer, ForeignKey("package_versions.id"), nullable=False, primary_key=True
+    )
+
+    # link ids of direct and transitive deps
+    link_ids = Column(ARRAY(Integer)) # ForeignKey("package_version_links.id"))
+
+    # what resolved it
+    package_manager = deferred(Column(package_manager_enum, nullable=False))
+    package_manager_version = deferred(Column(String, nullable=False))
+
+    # track when it was created
+    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+
+
+# TODO: add indexes
+# Index('', mytable.c.col5, mytable.c.col6, unique=True)
