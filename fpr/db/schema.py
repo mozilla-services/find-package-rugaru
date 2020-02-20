@@ -224,7 +224,7 @@ class Advisory(Base):
         )
 
 
-class NpmsIOScore(Base):
+class NPMSIOScore(Base):
     __tablename__ = "npmsio_scores"
 
     """
@@ -237,7 +237,9 @@ class NpmsIOScore(Base):
 
     id = Column(Integer, Sequence("npmsio_score_id_seq"), primary_key=True)
 
-    package_name = Column(String, nullable=False, primary_key=True)  # from .collected.metadata.name
+    package_name = Column(
+        String, nullable=False, primary_key=True
+    )  # from .collected.metadata.name
     package_version = Column(
         String, nullable=False, primary_key=True
     )  # from .collected.metadata.version

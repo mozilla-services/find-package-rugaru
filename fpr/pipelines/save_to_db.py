@@ -33,7 +33,7 @@ from fpr.db.schema import (
     PackageVersion,
     PackageLink,
     PackageGraph,
-    NpmsIOScore,
+    NPMSIOScore,
 )
 from fpr.models.pipeline import Pipeline
 from fpr.models.pipeline import add_infile_and_outfile, add_db_arg
@@ -312,7 +312,7 @@ def insert_npmsio_data(
 
         # only insert new rows
         if (
-            not session.query(NpmsIOScore.id)
+            session.query(NPMSIOScore.id)
             .filter_by(
                 package_name=fields["package_name"],
                 package_version=fields["package_version"],
@@ -320,16 +320,17 @@ def insert_npmsio_data(
             )
             .one_or_none()
         ):
-            session.add(NpmsIOScore(**fields))
+            log.debug(
+                f"skipping inserting npms.io score for {fields['package_name']}@{fields['package_version']}"
+                f" analyzed at {fields['analyzed_at']}"
+            )
+        else:
+            session.add(NPMSIOScore(**fields))
             session.commit()
             log.info(
                 f"added npms.io score for {fields['package_name']}@{fields['package_version']}"
                 f" analyzed at {fields['analyzed_at']}"
             )
-        else:
-            log.debug(
-                f"skipping inserting npms.io score for {fields['package_name']}@{fields['package_version']}"
-                f" analyzed at {fields['analyzed_at']}"
             )
 
 
