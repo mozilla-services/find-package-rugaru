@@ -361,6 +361,7 @@ def insert_npm_registry_data(
                     "keywords": ["keywords"],
                     "has_shrinkwrap": ["_hasShrinkwrap"],
                     "bugs_url": ["bugs", "url"],
+                    "bugs_email": ["bugs", "email"],
                     "author_name": ["author", "name"],
                     "author_email": ["author", "email"],
                     "author_url": ["author", "url"],

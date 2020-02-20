@@ -385,8 +385,11 @@ class NPMRegistryEntry(Base):
     # other means if a shrinkwrap exists.
     has_shrinkwrap = Column(Boolean, nullable=True)
 
-    # bugs: url e.g. {'url': 'https://github.com/MathieuTurcotte/node-backoff/issues'}
+    # bugs: url e.g.
+    # {'url': 'https://github.com/MathieuTurcotte/node-backoff/issues',
+    #  'email': 'support@company.example.com'} or maintainer@personal-email.example.com
     bugs_url = deferred(Column(String, nullable=True))
+    bugs_email = deferred(Column(String, nullable=True))
 
     # https://github.com/npm/registry/blob/master/docs/responses/package-metadata.md#human
     #
