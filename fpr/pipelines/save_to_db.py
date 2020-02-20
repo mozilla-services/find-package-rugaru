@@ -34,12 +34,18 @@ from fpr.db.schema import (
     PackageLink,
     PackageGraph,
     NPMSIOScore,
+    NPMRegistryEntry,
 )
 from fpr.models.pipeline import Pipeline
 from fpr.models.pipeline import add_infile_and_outfile, add_db_arg
 from fpr.pipelines.postprocess import parse_stdout_as_json, parse_stdout_as_jsonlines
 from fpr.rx_util import on_next_save_to_jsonl
-from fpr.serialize_util import iter_jsonlines, extract_fields, extract_nested_fields
+from fpr.serialize_util import (
+    iter_jsonlines,
+    extract_fields,
+    extract_nested_fields,
+    get_in,
+)
 from sqlalchemy.dialects.postgresql import array
 
 NAME = "save_to_db"
@@ -331,7 +337,73 @@ def insert_npmsio_data(
                 f"added npms.io score for {fields['package_name']}@{fields['package_version']}"
                 f" analyzed at {fields['analyzed_at']}"
             )
+
+
+def insert_npm_registry_data(
+    session: sqlalchemy.orm.Session, source: Generator[Dict[str, Any], None, None]
+) -> None:
+    for line in source:
+        # save version specific data
+        for version, version_data in line["versions"].items():
+            fields = extract_nested_fields(
+                version_data,
+                {
+                    "package_name": ["name"],
+                    "package_version": ["version"],
+                    "shasum": ["dist", "shasum"],
+                    "tarball": ["dist", "tarball"],
+                    "git_head": ["gitHead"],
+                    "repository_type": ["repository", "type"],
+                    "repository_url": ["repository", "url"],
+                    "description": ["description"],
+                    "url": ["url"],
+                    "license": ["license"],
+                    "keywords": ["keywords"],
+                    "has_shrinkwrap": ["_hasShrinkwrap"],
+                    "bugs_url": ["bugs", "url"],
+                    "author_name": ["author", "name"],
+                    "author_email": ["author", "email"],
+                    "author_url": ["author", "url"],
+                    "maintainers": ["maintainers"],
+                    "contributors": ["contributors"],
+                    "publisher_name": ["publisher", "name"],
+                    "publisher_email": ["publisher", "email"],
+                    "publisher_url": ["publisher", "url"],
+                    "publisher_node_version": ["_nodeVersion"],
+                    "publisher_npm_version": ["_npmVersion"],
+                },
             )
+            # published_at .time[<version>] e.g. '2014-05-23T21:21:04.170Z' (not from
+            # the version info object)
+            # where time: an object mapping versions to the time published, along with created and modified timestamps
+            fields["published_at"] = get_in(line, ["time", version])
+            fields["package_modified_at"] = get_in(line, ["time", "modified"])
+
+            fields[
+                "source_url"
+            ] = f"https://registry.npmjs.org/{fields['package_name']}"
+
+            if (
+                session.query(NPMRegistryEntry.id)
+                .filter_by(
+                    package_name=fields["package_name"],
+                    package_version=fields["package_version"],
+                    shasum=fields["shasum"],
+                    tarball=fields["tarball"],
+                )
+                .one_or_none()
+            ):
+                log.debug(
+                    f"skipping inserting npm registry entry for {fields['package_name']}@{fields['package_version']}"
+                    f" from {fields['tarball']} with sha {fields['shasum']}"
+                )
+            else:
+                session.add(NPMRegistryEntry(**fields))
+                session.commit()
+                log.info(
+                    f"added npm registry entry for {fields['package_name']}@{fields['package_version']}"
+                    f" from {fields['tarball']} with sha {fields['shasum']}"
+                )
 
 
 async def run_pipeline(
@@ -363,6 +435,8 @@ async def run_pipeline(
                         insert_package_audit(session, task_data)
                     else:
                         log.debug(f"skipping unrecognized task {task_data['name']}")
+        elif args.input_type == "dep_meta_npm_reg":
+            insert_npm_registry_data(session, source)
         elif args.input_type == "dep_meta_npmsio":
             insert_npmsio_data(session, source)
         else:
