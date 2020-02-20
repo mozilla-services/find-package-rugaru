@@ -417,9 +417,9 @@ class NPMRegistryEntry(Base):
     # publication info
     # _npmUser: the author object for the npm user who published this version
     # e.g. {'name': 'mathieu', 'email': 'turcotte.mat@gmail.com'}
+    # note: no url
     publisher_name = deferred(Column(String, nullable=True))
     publisher_email = deferred(Column(String, nullable=True))
-    publisher_url = deferred(Column(String, nullable=True))
     # _nodeVersion: the version of node used to publish this
     publisher_node_version = deferred(Column(String, nullable=True))
     # _npmVersion: the version of the npm client used to publish this
