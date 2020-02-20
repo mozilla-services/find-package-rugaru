@@ -33,6 +33,7 @@ from fpr.db.schema import (
     PackageVersion,
     PackageLink,
     PackageGraph,
+    NpmsIOScore,
 )
 from fpr.models.pipeline import Pipeline
 from fpr.models.pipeline import add_infile_and_outfile, add_db_arg
@@ -259,6 +260,79 @@ def insert_package_audit(session: sqlalchemy.orm.Session, task_data: Dict) -> No
         session.commit()
 
 
+def insert_npmsio_data(
+    session: sqlalchemy.orm.Session, source: Generator[Dict[str, Any], None, None]
+) -> None:
+    for line in source:
+        fields = extract_nested_fields(
+            line,
+            {
+                "package_name": ["collected", "metadata", "name"],
+                "package_version": ["collected", "metadata", "version"],
+                "analyzed_at": ["analyzedAt"],  # e.g. "2019-11-27T19:31:42.541Z"
+                # overall score from .score.final on the interval [0, 1]
+                "score": ["score", "final"],
+                # score components on the interval [0, 1]
+                "quality": ["score", "detail", "quality"],
+                "popularity": ["score", "detail", "popularity"],
+                "maintenance": ["score", "detail", "maintenance"],
+                # score subcomponent/detail fields from .evaluation.<component>.<subcomponent>
+                # generally frequencies and subscores are decimals between [0, 1]
+                # or counts of downloads, stars, etc.
+                # acceleration is signed (+/-)
+                "branding": ["evaluation", "quality", "branding"],
+                "carefulness": ["evaluation", "quality", "carefulness"],
+                "health": ["evaluation", "quality", "health"],
+                "tests": ["evaluation", "quality", "tests"],
+                "community_interest": ["evaluation", "popularity", "communityInterest"],
+                "dependents_count": ["evaluation", "popularity", "dependentsCount"],
+                "downloads_acceleration": [
+                    "evaluation",
+                    "popularity",
+                    "downloadsAcceleration",
+                ],
+                "downloads_count": ["evaluation", "popularity", "downloadsCount"],
+                "commits_frequency": ["evaluation", "maintenance", "commitsFrequency"],
+                "issues_distribution": [
+                    "evaluation",
+                    "maintenance",
+                    "issuesDistribution",
+                ],
+                "open_issues": ["evaluation", "maintenance", "openIssues"],
+                "releases_frequency": [
+                    "evaluation",
+                    "maintenance",
+                    "releasesFrequency",
+                ],
+            },
+        )
+        fields[
+            "source_url"
+        ] = f"https://api.npms.io/v2/package/{fields['package_name']}"
+
+        # only insert new rows
+        if (
+            not session.query(NpmsIOScore.id)
+            .filter_by(
+                package_name=fields["package_name"],
+                package_version=fields["package_version"],
+                analyzed_at=fields["analyzed_at"],
+            )
+            .one_or_none()
+        ):
+            session.add(NpmsIOScore(**fields))
+            session.commit()
+            log.info(
+                f"added npms.io score for {fields['package_name']}@{fields['package_version']}"
+                f" analyzed at {fields['analyzed_at']}"
+            )
+        else:
+            log.debug(
+                f"skipping inserting npms.io score for {fields['package_name']}@{fields['package_version']}"
+                f" analyzed at {fields['analyzed_at']}"
+            )
+
+
 async def run_pipeline(
     source: Generator[Dict[str, Any], None, None], args: argparse.Namespace
 ) -> None:
@@ -282,12 +356,14 @@ async def run_pipeline(
         if args.input_type == "postprocessed_repo_task":
             for line in source:
                 for task_data in line["tasks"].values():
-                    # if task_data["name"] == "list_metadata":
-                    #     insert_package_graph(session, task_data)
-                    if task_data["name"] == "audit":
+                    if task_data["name"] == "list_metadata":
+                        insert_package_graph(session, task_data)
+                    elif task_data["name"] == "audit":
                         insert_package_audit(session, task_data)
                     else:
                         log.debug(f"skipping unrecognized task {task_data['name']}")
+        elif args.input_type == "dep_meta_npmsio":
+            insert_npmsio_data(session, source)
         else:
             raise NotImplementedError()
 
