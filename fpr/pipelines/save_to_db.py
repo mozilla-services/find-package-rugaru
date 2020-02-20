@@ -232,8 +232,9 @@ def insert_package_audit(session: sqlalchemy.orm.Session, task_data: Dict) -> No
         )
         if len(impacted_versions) != len(impacted_version_package_ids):
             log.warning(
-                f"missing package versions in the db or misparsed audit output version: "
-                f"{impacted_versions} {impacted_version_package_ids}"
+                f"missing package versions for {advisory_fields['package_name']!r}"
+                f" in the db or misparsed audit output version:"
+                f" {impacted_versions} {impacted_version_package_ids}"
             )
 
         if db_advisory.vulnerable_package_version_ids is None:
@@ -243,14 +244,13 @@ def insert_package_audit(session: sqlalchemy.orm.Session, task_data: Dict) -> No
 
         # TODO: lock the row?
         vpvids = set(
-            vid
-            for result in session.query(Advisory)
-            .filter_by(id=db_advisory.id)
-            .first()
-            .vulnerable_package_version_ids
-            for vid in result
+            list(
+                session.query(Advisory)
+                .filter_by(id=db_advisory.id)
+                .first()
+                .vulnerable_package_version_ids
+            )
         )
-        print(vpvids, impacted_version_package_ids)
         vpvids.update(set(impacted_version_package_ids))
 
         session.query(Advisory.id).filter_by(id=db_advisory.id).update(
