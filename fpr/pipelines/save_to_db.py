@@ -380,6 +380,22 @@ def insert_npm_registry_data(
                 fields["license_url"] = fields["license_type"].get("url", None)
                 fields["license_type"] = fields["license_type"].get("type", None)
 
+            # looking at you debuglog@0.0.{3,4} with:
+            # [{"name": "StrongLoop", "url": "http://strongloop.com/license/"}, "MIT"],
+            if not (
+                (
+                    isinstance(fields["license_type"], str)
+                    or fields["license_type"] is None
+                )
+                and (
+                    isinstance(fields["license_url"], str)
+                    or fields["license_url"] is None
+                )
+            ):
+                log.warning(f"skipping weird license format {fields['license_type']}")
+                fields["license_url"] = None
+                fields["license_type"] = None
+
             # published_at .time[<version>] e.g. '2014-05-23T21:21:04.170Z' (not from
             # the version info object)
             # where time: an object mapping versions to the time published, along with created and modified timestamps
