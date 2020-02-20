@@ -5,6 +5,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     LargeBinary,
+    Numeric,
     Index,
     Integer,
     Sequence,
@@ -214,6 +215,108 @@ class Advisory(Base):
                 f"{cls.__tablename__}_vulnerable_package_version_ids_idx",
                 "vulnerable_package_version_ids",
                 postgresql_using="gin",
+            ),
+            Index(
+                f"{cls.__tablename__}_inserted_idx",
+                "inserted_at",
+                expression.desc(cls.inserted_at),
+            ),
+        )
+
+
+class NpmsIOScore(Base):
+    __tablename__ = "npmsio_scores"
+
+    """
+    Score of a package version at the analyzed_at time
+
+    many to one with package_versions, so join on package_name and package_version
+    and pick an analyzed_at date or compare over time
+    """
+    # TODO: make sure we aren't truncating data
+
+    id = Column(Integer, Sequence("npmsio_score_id_seq"), primary_key=True)
+
+    package_name = Column(String, nullable=False)  # from .collected.metadata.name
+    package_version = Column(
+        String, nullable=False, primary_key=True
+    )  # from .collected.metadata.version
+    analyzed_at = Column(
+        DateTime(timezone=False), nullable=False, primary_key=True
+    )  # from .analyzedAt e.g. "2019-11-27T19:31:42.541Z
+
+    # e.g. https://api.npms.io/v2/package/{package_name} might change if the API changes
+    source_url = Column(String, nullable=False)
+
+    # overall score from .score.final on the interval [0, 1]
+    score = Column(Numeric, nullable=True)  # from .score.final
+
+    # score components on the interval [0, 1]
+    quality = Column(Numeric, nullable=True)  # from .detail.quality
+    popularity = Column(Numeric, nullable=True)  # from .detail.popularity
+    maintenance = Column(Numeric, nullable=True)  # from .detail.maintenance
+
+    # score subcomponent/detail fields from .evaluation.<component>.<subcomponent>
+
+    # all on the interval [0, 1]
+    branding = Column(Numeric, nullable=True)  # from .evaluation.quality.branding
+    carefulness = Column(Numeric, nullable=True)  # from .evaluation.quality.carefulness
+    health = Column(Numeric, nullable=True)  # from .evaluation.quality.health
+    tests = Column(Numeric, nullable=True)  # from .evaluation.quality.tests
+
+    community_interest = Column(
+        Integer, nullable=True
+    )  # 0+ from .evaluation.popularity.communityInterest
+    dependents_count = Column(
+        Integer, nullable=True
+    )  # 0+ from .evaluation.popularity.dependentsCount
+    downloads_count = Column(
+        Numeric, nullable=True
+    )  # some of these are fractional? from .evaluation.popularity.downloadsCount
+    downloads_acceleration = Column(
+        Numeric, nullable=True
+    )  # signed decimal (+/-) from .evaluation.popularity.downloadsAcceleration
+
+    # all on the interval [0, 1]
+    commits_frequency = Column(
+        Numeric, nullable=True
+    )  # from .evaluation.maintenance.commitsFrequency
+    issues_distribution = Column(
+        Numeric, nullable=True
+    )  # from .evaluation.maintenance.issuesDistribution
+    open_issues = Column(
+        Numeric, nullable=True
+    )  # from .evaluation.maintenance.openIssues
+    releases_frequency = Column(
+        Numeric, nullable=True
+    )  # from .evaluation.maintenance.releasesFrequency
+
+    # TODO: add .collected fields that feed into the score
+
+    # track when it was inserted or last updated in our DB
+    inserted_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
+
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            # TODO: add indexes on interesting score columns?
+            Index(
+                f"{cls.__tablename__}_unique_idx",
+                "package_name",
+                "package_version",
+                "analyzed_at",
+                unique=True,
+            ),
+            Index(
+                f"{cls.__tablename__}_analyzed_idx",
+                "updated_at",
+                expression.desc(cls.analyzed_at),
+            ),
+            Index(
+                f"{cls.__tablename__}_updated_idx",
+                "updated_at",
+                expression.desc(cls.updated_at),
             ),
             Index(
                 f"{cls.__tablename__}_inserted_idx",
