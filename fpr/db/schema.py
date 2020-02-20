@@ -34,6 +34,7 @@ def pg_utcnow(element, compiler, **kw):
 Base: sqlalchemy.ext.declarative.declarative_base = declarative_base()
 
 
+# TODO: harmonize with stuff defined in models/languages
 lang_enum = ENUM("node", "rust", "python", name="language_enum")
 package_manager_enum = ENUM("npm", "yarn", name="package_manager_enum")
 
@@ -55,8 +56,8 @@ class PackageVersion(Base):
     repo_url = deferred(Column(String, nullable=True))
     repo_commit = deferred(Column(LargeBinary, nullable=True))
 
-    # track when it was created and changed
-    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    # track when it was inserted and changed
+    inserted_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
     updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
 
     @declared_attr
@@ -70,15 +71,15 @@ class PackageVersion(Base):
                 unique=True,
             ),
             Index(
-                f"{cls.__tablename__}_created_idx",
-                "created_at",
-                expression.desc(cls.created_at),
+                f"{cls.__tablename__}_inserted_idx",
+                "inserted_at",
+                expression.desc(cls.inserted_at),
             ),
         )
 
 
 class PackageLink(Base):
-    __tablename__ = "package_version_links"
+    __tablename__ = "package_links"
 
     id = Column(
         Integer, Sequence("package_version_link_id_seq"), primary_key=True, unique=True
@@ -91,8 +92,8 @@ class PackageLink(Base):
         Integer, primary_key=True, nullable=False,  # ForeignKey("package_versions.id"),
     )
 
-    # track when it was created
-    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    # track when it was inserted
+    inserted_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
 
     @declared_attr
     def __table_args__(cls):
@@ -116,9 +117,9 @@ class PackageLink(Base):
                 unique=True,
             ),
             Index(
-                f"{cls.__tablename__}_created_idx",
-                "created_at",
-                expression.desc(cls.created_at),
+                f"{cls.__tablename__}_inserted_idx",
+                "inserted_at",
+                expression.desc(cls.inserted_at),
             ),
         )
 
@@ -128,20 +129,20 @@ class PackageGraph(Base):
 
     id = Column(Integer, Sequence("package_graphs_id_seq"), primary_key=True)
 
-    # package version did we resolved
+    # package version we resolved
     root_package_version_id = Column(
         Integer, nullable=False, primary_key=True,  # ForeignKey("package_versions.id"),
     )
 
     # link ids of direct and transitive deps
-    link_ids = Column(ARRAY(Integer))  # ForeignKey("package_version_links.id"))
+    link_ids = deferred(Column(ARRAY(Integer)))  # ForeignKey("package_links.id"))
 
     # what resolved it
     package_manager = deferred(Column(package_manager_enum, nullable=True))
     package_manager_version = deferred(Column(String, nullable=True))
 
-    # track when it was created
-    created_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    # track when it was inserted
+    inserted_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
 
     @declared_attr
     def __table_args__(cls):
@@ -158,8 +159,65 @@ class PackageGraph(Base):
                 "package_manager_version",
             ),
             Index(
-                f"{cls.__tablename__}_created_idx",
-                "created_at",
-                expression.desc(cls.created_at),
+                f"{cls.__tablename__}_inserted_idx",
+                "inserted_at",
+                expression.desc(cls.inserted_at),
+            ),
+        )
+
+
+class Advisory(Base):
+    __tablename__ = "advisories"
+
+    id = Column(Integer, Sequence("advisories_id_seq"), primary_key=True, unique=True)
+    language = Column(lang_enum, nullable=False, primary_key=True)
+
+    # has optional name, npm advisory id, and url
+    package_name = Column(
+        String, nullable=True
+    )  # included in case vulnerable_package_version_ids is empty
+    npm_advisory_id = Column(Integer, nullable=True)
+    url = Column(String, nullable=True)
+
+    severity = Column(String, nullable=True)
+    cwe = Column(Integer, nullable=True)
+    cves = deferred(Column(ARRAY(String), nullable=True))
+
+    exploitability = Column(Integer, nullable=True)
+    title = Column(String, nullable=True)
+
+    # vulnerable and patched versions from the advisory as a string
+    vulnerable_versions = deferred(Column(String, nullable=True))
+    patched_versions = deferred(Column(String, nullable=True))
+
+    # vulnerable package versions from our resolved package versions
+    # TODO: validate affected deps. from findings[].paths[] for a few graphs
+    vulnerable_package_version_ids = deferred(
+        Column(ARRAY(Integer))
+    )  # ForeignKey("package_versions.id"))
+
+    # advisory publication info
+    created = deferred(Column(DateTime(timezone=False), nullable=True))
+    updated = deferred(Column(DateTime(timezone=False), nullable=True))
+
+    # track when it was inserted or last updated in our DB
+    inserted_at = deferred(Column(DateTime(timezone=False), server_default=utcnow()))
+    updated_at = deferred(Column(DateTime(timezone=False), onupdate=utcnow()))
+
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            Index(f"{cls.__tablename__}_language_idx", "language"),
+            Index(f"{cls.__tablename__}_pkg_name_idx", "package_name"),
+            Index(f"{cls.__tablename__}_npm_advisory_id_idx", "npm_advisory_id"),
+            Index(
+                f"{cls.__tablename__}_vulnerable_package_version_ids_idx",
+                "vulnerable_package_version_ids",
+                postgresql_using="gin",
+            ),
+            Index(
+                f"{cls.__tablename__}_inserted_idx",
+                "inserted_at",
+                expression.desc(cls.inserted_at),
             ),
         )

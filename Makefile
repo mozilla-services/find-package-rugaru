@@ -106,12 +106,13 @@ run-save-to-db:
 	# cat $(DATA_DIR)/fxa/02_dep_files.jsonl $(DATA_DIR)/tc/02_dep_files.jsonl | $(FPR) save_to_db --create-tables --input-type dep_file
 	# cat $(DATA_DIR)/fxa/03_tasks.jsonl | $(FPR) save_to_db --create-tables --input-type repo_task
 	# cat $(DATA_DIR)/tc/03_tasks.jsonl | $(FPR) save_to_db --create-tables --input-type repo_task
-	# cat $(DATA_DIR)/fxa/04_deps_vulns.jsonl $(DATA_DIR)/tc/04_deps_vulns.jsonl | $(FPR) save_to_db --create-tables --input-type postprocessed_repo_task
+	# $(DATA_DIR)/tc/04_deps_vulns.jsonl
+	cat $(DATA_DIR)/fxa/04_deps_vulns.jsonl | $(FPR) save_to_db --create-views --create-tables --input-type postprocessed_repo_task
 
 	# cat $(DATA_DIR)/fxa/06_npm_registry_metadata.jsonl $(DATA_DIR)/tc/06_npm_registry_metadata.jsonl | $(FPR) save_to_db --create-tables --input-type dep_meta_npm_reg
 	# cat $(DATA_DIR)/fxa/06_npmsio_scores.jsonl $(DATA_DIR)/tc/06_npmsio_scores.jsonl | $(FPR) save_to_db --create-tables --input-type dep_meta_npmsio
-	#  --create-views
-	$(FPR) save_to_db --create-tables --input-type postprocessed_repo_task
+	#
+	# $(FPR) save_to_db --create-tables --input-type postprocessed_repo_task
 
 run-crate-graph-and-save:
 	$(FPR) crate_graph -i tests/fixtures/cargo_metadata_serialized.json -o crate_graph.jsonl --dot-filename default.dot
