@@ -475,6 +475,16 @@ class NPMRegistryEntry(Base):
                 unique=True,
             ),
             Index(
+                f"{cls.__tablename__}_contributors_idx",
+                "contributors",
+                postgresql_using="gin",
+            ),
+            Index(
+                f"{cls.__tablename__}_maintainers_idx",
+                "maintainers",
+                postgresql_using="gin",
+            ),
+            Index(
                 f"{cls.__tablename__}_updated_idx",
                 "updated_at",
                 expression.desc(cls.updated_at),
