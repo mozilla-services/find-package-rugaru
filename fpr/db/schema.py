@@ -424,10 +424,10 @@ class NPMRegistryEntry(Base):
     # the version info object)
     #
     # where time: an object mapping versions to the time published, along with created and modified timestamps
-    published_at = Column(DateTime(timezone=False, nullable=True))
+    published_at = Column(DateTime(timezone=False), nullable=True)
 
     # when ANY VERSION of the package was last modified (i.e. how fresh is this entry)
-    package_modified_at = Column(DateTime(timezone=False, nullable=True))
+    package_modified_at = Column(DateTime(timezone=False), nullable=True)
 
     # metadata about how we fetched it
 
