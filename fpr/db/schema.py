@@ -374,7 +374,9 @@ class NPMRegistryEntry(Base):
 
     # the SPDX identifier https://spdx.org/licenses/ of the package's license
     # from .versions[<version>].license
-    license = Column(String, nullable=True)
+    license_type = deferred(Column(String, nullable=True))
+    # link to the license site or file in the repo
+    license_url = deferred(Column(String, nullable=True))
 
     # array of string keywords e.g. ['backoff', 'retry', 'fibonacci', 'exponential']
     keywords = deferred(Column(ARRAY(String)))

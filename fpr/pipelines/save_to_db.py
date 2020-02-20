@@ -357,7 +357,7 @@ def insert_npm_registry_data(
                     "repository_url": ["repository", "url"],
                     "description": ["description"],
                     "url": ["url"],
-                    "license": ["license"],
+                    "license_type": ["license"],
                     "keywords": ["keywords"],
                     "has_shrinkwrap": ["_hasShrinkwrap"],
                     "bugs_url": ["bugs", "url"],
@@ -374,6 +374,13 @@ def insert_npm_registry_data(
                     "publisher_npm_version": ["_npmVersion"],
                 },
             )
+            # license can we a string e.g. 'MIT'
+            # or dict e.g. {'type': 'MIT', 'url': 'https://github.com/jonschlinkert/micromatch/blob/master/LICENSE'}
+            fields["license_url"] = None
+            if isinstance(fields["license_type"], dict):
+                fields["license_url"] = fields["license_type"].get("url", None)
+                fields["license_type"] = fields["license_type"].get("type", None)
+
             # published_at .time[<version>] e.g. '2014-05-23T21:21:04.170Z' (not from
             # the version info object)
             # where time: an object mapping versions to the time published, along with created and modified timestamps
