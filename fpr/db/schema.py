@@ -237,7 +237,7 @@ class NpmsIOScore(Base):
 
     id = Column(Integer, Sequence("npmsio_score_id_seq"), primary_key=True)
 
-    package_name = Column(String, nullable=False)  # from .collected.metadata.name
+    package_name = Column(String, nullable=False, primary_key=True)  # from .collected.metadata.name
     package_version = Column(
         String, nullable=False, primary_key=True
     )  # from .collected.metadata.version
@@ -310,7 +310,7 @@ class NpmsIOScore(Base):
             ),
             Index(
                 f"{cls.__tablename__}_analyzed_idx",
-                "updated_at",
+                "analyzed_at",
                 expression.desc(cls.analyzed_at),
             ),
             Index(
