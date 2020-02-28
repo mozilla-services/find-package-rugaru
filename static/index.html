@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title id="title">Mozilla Dependency Observatory</title>
+</head>
+
+<body>
+    <h1>Welcome to Mozilla's Dependency Observatory</h1>
+    <p>TODO enter some blub here:)</p>
+    <h2>Find a package</h2>
+    <form action="results.html" method="get">
+    <table>
+        <tr>
+            <td><label for="manager">Package Manager:</label></td>
+            <td>
+                <select id="manager" name="manager">
+                    <option value="npm">NPM</option>
+                </select>
+            </td>
+        </tr>
+        <tr>
+            <td><label for="package">Package Name:</label></td>
+            <td><input type="text" id="package" name="package"></input></td>
+        </tr>
+        <tr>
+            <td><label for="version">Package Version:</label></td>
+            <td><input type="text" id="version" name="version"></input></td>
+        <tr>
+            <td></td>
+            <td><input type="submit" value="Submit"></input></td>
+        </tr>
+    </table>
+    </form>
+    <h2>Support</h2>
+    <p>For bugs and feature requests, please create <a href="https://github.com/mozilla-services/find-package-rugaru/issues">issues
+            on GitHub</a>.</p>
+</body>
+
+</html>

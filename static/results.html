@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://raw.githubusercontent.com/;">
+    <title id="title">Mozilla Dependency Observatory</title>
+    <script src="do.js"></script>
+</head>
+
+<body>
+    <h1>Welcome to Mozilla's Dependency Observatory</h1>
+    <p>TODO enter some blub here:)</p>
+    <table>
+        <tr>
+            <td><h2>Summary</h2></td>
+        </tr>
+        <tr>
+            <td>Package:</td>
+            <td id="package"></td>
+        </tr>
+        <tr>
+            <td>Version:</td>
+            <td id="version"></td>
+        </tr>
+        <tr>
+            <td>Total Score</td>
+            <td id="top-score"></td>
+        </tr>
+        <tr>
+            <td>NPMS IO Score</td>
+            <td id="npms-io-score"></td>
+        </tr>
+        <tr>
+            <td>Number of Authors</td>
+            <td id="authors-count"></td>
+        </tr>
+        <tr>
+            <td>Number of Contributors</td>
+            <td id="contributor-count"></td>
+        </tr>
+        <tr>
+            <td>Number of Direct Dependencies</td>
+            <td id="direct-dep-count"></td>
+        </tr>
+        <tr>
+            <td>Total Number of Dependencies</td>
+            <td id="all_dep_count"></td>
+        </tr>
+        <tr>
+            <td><h2>Details</h2></td>
+        </tr>
+        <tr>
+            <th>Direct Dependencies</th>
+            <td>
+                <table id="deps">
+                    <tr>
+                        <th>Package</th>
+                        <th>Version</th>
+                        <th>Score</th>
+                        <th>Direct deps</th>
+                        <th>All deps</th>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+    <h2>Support</h2>
+    <p>For bugs and feature requests, please create <a href="https://github.com/mozilla-services/find-package-rugaru/issues">issues on GitHub</a>.</p>
+</body>
+
+</html>
